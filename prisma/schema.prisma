@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model Shop {
+  id         Int       @id @default(autoincrement())
+  shopDomain String    @unique
+  createdAt  DateTime  @default(now())
+
+  customers  Customer[]
+}
+
+model Customer {
+  id                Int      @id @default(autoincrement())
+  shopId            Int
+  shop              Shop     @relation(fields: [shopId], references: [id])
+
+  shopifyCustomerId String
+  name              String?
+  email             String?
+  loyaltyPoints     Int      @default(0)
+  createdAt         DateTime @default(now())
+
+  transactions      PointTransaction[]
+  rewards           Reward[]
+
+  @@unique([shopId, shopifyCustomerId])
+}
+
+model PointTransaction {
+  id              Int      @id @default(autoincrement())
+  customerId      Int
+  customer        Customer @relation(fields: [customerId], references: [id])
+
+  points          Int
+  transactionType String
+  reason          String?
+  createdAt       DateTime @default(now())
+}
+
+model Reward {
+  id             Int      @id @default(autoincrement())
+
+  customerId     Int
+  customer       Customer @relation(fields: [customerId], references: [id])
+
+  rewardCode     String   @unique
+  discountAmount Float
+
+  pointsUsed     Int
+
+  status         String   @default("active")
+
+  expiresAt      DateTime?
+
+  createdAt      DateTime @default(now())
+}
+model WebhookLog {
+  id        Int      @id @default(autoincrement())
+  topic     String
+  payload   Json
+  processed Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
