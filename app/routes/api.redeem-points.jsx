@@ -101,48 +101,50 @@ export const action = async ({ request }) => {
     }
     `;
     
-    const response =
-    await admin.graphql(
+    const response = await admin.graphql(
       mutation,
       {
         variables: {
           basicCodeDiscount: {
             title: rewardCode,
-  
+    
             code: rewardCode,
-  
-            startsAt:
-              new Date().toISOString(),
-
+    
+            startsAt: new Date().toISOString(),
             context: {
-              all: true,
+              customers: {
+                add: [
+                  `gid://shopify/Customer/${customer.shopifyCustomerId}`,
+                ],
+              },
             },
-  
+    
             customerGets: {
               value: {
                 discountAmount: {
-                  amount:
-                    discountAmount.toString(),
-  
-                  appliesOnEachItem:
-                    false,
+                  amount: discountAmount.toString(),
+                  appliesOnEachItem: false,
                 },
               },
-  
+    
               items: {
                 all: true,
               },
             },
-  
-            appliesOncePerCustomer:
-              true,
-
+    
+            combinesWith: {
+              orderDiscounts: false,
+              productDiscounts: false,
+              shippingDiscounts: false,
+            },
+    
+            appliesOncePerCustomer: true,
+    
             usageLimit: 1,
           },
         },
       }
     );
-
     const result = await response.json();
     const discountResult =
       result?.data?.discountCodeBasicCreate;
@@ -267,7 +269,11 @@ export const action = async ({ request }) => {
       );
     }
 
-    console.error(error);
+    console.error(
+      "Redeem error:",
+      error,
+      error?.stack
+    );
 
     return Response.json(
       {

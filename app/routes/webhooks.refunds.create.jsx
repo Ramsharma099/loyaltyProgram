@@ -1,8 +1,12 @@
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import {
+  calculateSpendPoints,
+  getLoyaltySettings,
+} from "../services/loyalty-settings.server";
 
 export const action = async ({ request }) => {
-  const { payload } = await authenticate.webhook(request);
+  const { payload, shop } = await authenticate.webhook(request);
 
   try {
     const customerData = payload.order.customer;
@@ -13,9 +17,12 @@ export const action = async ({ request }) => {
 
     const refundAmount = Number(payload.order.total_price);
 
-    // reverse formula
-    const pointsToDeduct =
-      Math.floor(refundAmount / 100) * 10;
+    const { settings } = await getLoyaltySettings(shop);
+    const pointsToDeduct = calculateSpendPoints(
+      refundAmount,
+      settings.refundSpendAmount,
+      settings.refundSpendPoints,
+    );
 
     const customer = await prisma.customer.findFirst({
       where: {

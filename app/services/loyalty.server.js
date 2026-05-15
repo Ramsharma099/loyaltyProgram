@@ -1,22 +1,9 @@
 import prisma from "../db.server";
+import { getLoyaltySettings } from "./loyalty-settings.server";
 
 export async function addSignupBonus(shopDomain, customerData) {
   try {
-    // find shop
-    let shop = await prisma.shop.findUnique({
-      where: {
-        shopDomain,
-      },
-    });
-
-    // create shop if not exists
-    if (!shop) {
-      shop = await prisma.shop.create({
-        data: {
-          shopDomain,
-        },
-      });
-    }
+    const { shop, settings } = await getLoyaltySettings(shopDomain);
 
     // check customer exists
     let customer = await prisma.customer.findFirst({
@@ -38,7 +25,7 @@ export async function addSignupBonus(shopDomain, customerData) {
         shopifyCustomerId: String(customerData.id),
         name: `${customerData.first_name || ""} ${customerData.last_name || ""}`.trim(),
         email: customerData.email,
-        loyaltyPoints: 100,
+        loyaltyPoints: settings.signupBonusPoints,
       },
     });
 
@@ -46,7 +33,7 @@ export async function addSignupBonus(shopDomain, customerData) {
     await prisma.pointTransaction.create({
       data: {
         customerId: customer.id,
-        points: 100,
+        points: settings.signupBonusPoints,
         transactionType: "credit",
         reason: "Signup Bonus",
       },

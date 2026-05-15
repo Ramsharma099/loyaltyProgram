@@ -1,23 +1,14 @@
 import prisma from "../db.server";
+import {
+  calculateSpendPoints,
+  getLoyaltySettings,
+} from "../services/loyalty-settings.server";
 
 export const loader = async () => {
   try {
     const shopDomain = "hydrogen-jey.myshopify.com";
 
-    // find or create shop
-    let shop = await prisma.shop.findUnique({
-      where: {
-        shopDomain,
-      },
-    });
-
-    if (!shop) {
-      shop = await prisma.shop.create({
-        data: {
-          shopDomain,
-        },
-      });
-    }
+    const { shop, settings } = await getLoyaltySettings(shopDomain);
 
     // sample order data
     const order = {
@@ -27,8 +18,11 @@ export const loader = async () => {
       totalPrice: 1250,
     };
 
-    // calculate points
-    const points = Math.floor(order.totalPrice / 100) * 10;
+    const points = calculateSpendPoints(
+      order.totalPrice,
+      settings.orderSpendAmount,
+      settings.orderSpendPoints,
+    );
 
     // find customer
     let customer = await prisma.customer.findFirst({

@@ -1,5 +1,9 @@
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import {
+  calculateSpendPoints,
+  getLoyaltySettings,
+} from "../services/loyalty-settings.server";
 
 export const action = async ({ request }) => {
   const { topic, shop, payload } = await authenticate.webhook(request);
@@ -20,23 +24,12 @@ export const action = async ({ request }) => {
 
     const orderAmount = Number(payload.total_price);
 
-    // loyalty formula
-    const points = Math.floor(orderAmount / 100) * 10;
-
-    // find or create shop
-    let shopRecord = await prisma.shop.findUnique({
-      where: {
-        shopDomain: shop,
-      },
-    });
-
-    if (!shopRecord) {
-      shopRecord = await prisma.shop.create({
-        data: {
-          shopDomain: shop,
-        },
-      });
-    }
+    const { shop: shopRecord, settings } = await getLoyaltySettings(shop);
+    const points = calculateSpendPoints(
+      orderAmount,
+      settings.orderSpendAmount,
+      settings.orderSpendPoints,
+    );
 
     // find customer
     let customer = await prisma.customer.findFirst({

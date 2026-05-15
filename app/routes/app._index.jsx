@@ -87,6 +87,61 @@ export default function Dashboard() {
           grid-template-columns: repeat(4, minmax(0, 1fr));
         }
 
+        .settingsBanner {
+          align-items: center;
+          background: #ffffff;
+          border: 1px solid #dcdfe4;
+          border-radius: 8px;
+          box-shadow: 0 1px 0 rgba(26, 26, 26, 0.04);
+          display: flex;
+          gap: 16px;
+          justify-content: space-between;
+          padding: 16px;
+        }
+
+        .settingsBannerTitle {
+          color: #202223;
+          font-size: 16px;
+          font-weight: 650;
+          line-height: 24px;
+          margin: 0;
+        }
+
+        .settingsLink {
+          align-items: center;
+          background: #202223;
+          border-radius: 8px;
+          color: #ffffff;
+          display: inline-flex;
+          font-size: 14px;
+          font-weight: 650;
+          justify-content: center;
+          line-height: 20px;
+          min-height: 38px;
+          padding: 8px 16px;
+          text-decoration: none;
+          transition:
+            background 120ms ease,
+            box-shadow 120ms ease,
+            transform 120ms ease;
+          white-space: nowrap;
+        }
+
+        .settingsLink:hover {
+          background: #000000;
+          box-shadow: 0 2px 6px rgba(26, 26, 26, 0.18);
+          color: #ffffff;
+          transform: translateY(-1px);
+          text-decoration: none;
+        }
+
+        .settingsLink:focus-visible {
+          box-shadow:
+            0 0 0 2px #ffffff,
+            0 0 0 4px #005bd3;
+          outline: none;
+        }
+
         .summaryCard {
           background: #ffffff;
           border: 1px solid #dcdfe4;
@@ -150,6 +205,26 @@ export default function Dashboard() {
           padding: 16px;
         }
 
+        .panelActions {
+          align-items: center;
+          display: flex;
+          gap: 12px;
+        }
+
+        .textLink {
+          color: #005bd3;
+          font-size: 13px;
+          font-weight: 650;
+          line-height: 20px;
+          text-decoration: none;
+          white-space: nowrap;
+        }
+
+        .textLink:hover {
+          color: #003a8c;
+          text-decoration: underline;
+        }
+
         .panelTitle {
           color: #202223;
           font-size: 16px;
@@ -195,11 +270,29 @@ export default function Dashboard() {
             align-items: flex-start;
             flex-direction: column;
           }
+
+          .settingsBanner {
+            align-items: flex-start;
+            flex-direction: column;
+          }
         }
       `}</style>
 
       <s-section>
         <div className="dashboardStack">
+          <div className="settingsBanner">
+            <div>
+              <h2 className="settingsBannerTitle">Point settings</h2>
+              <div className="tableMeta">
+                Set how many points customers earn for signup, orders, and
+                refunds.
+              </div>
+            </div>
+            <a className="settingsLink" href="/app/settings">
+              Configure points
+            </a>
+          </div>
+
           <div className="summaryGrid">
             {stats.map((stat) => (
               <div className="summaryCard" key={stat.label}>
@@ -221,8 +314,13 @@ export default function Dashboard() {
                 <h2 className="panelTitle">Recent customers</h2>
                 <div className="tableMeta">Latest 10 loyalty members</div>
               </div>
-              <div className="tableMeta">
-                {formatter.format(customers.length)} shown
+              <div className="panelActions">
+                <a className="textLink" href="/app/customers">
+                  View all customers
+                </a>
+                <div className="tableMeta">
+                  {formatter.format(customers.length)} shown
+                </div>
               </div>
             </div>
 

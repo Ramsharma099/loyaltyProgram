@@ -28,17 +28,33 @@ model Session {
 }
 
 model Shop {
-  id         Int       @id @default(autoincrement())
-  shopDomain String    @unique
-  createdAt  DateTime  @default(now())
+  id         Int      @id @default(autoincrement())
+  shopDomain String   @unique
+  createdAt  DateTime @default(now())
 
-  customers  Customer[]
+  customers      Customer[]
+  loyaltySetting LoyaltySetting?
+}
+
+model LoyaltySetting {
+  id     Int  @id @default(autoincrement())
+  shopId Int  @unique
+  shop   Shop @relation(fields: [shopId], references: [id])
+
+  signupBonusPoints Int @default(100)
+  orderSpendAmount  Int @default(100)
+  orderSpendPoints  Int @default(10)
+  refundSpendAmount Int @default(100)
+  refundSpendPoints Int @default(10)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Customer {
-  id                Int      @id @default(autoincrement())
-  shopId            Int
-  shop              Shop     @relation(fields: [shopId], references: [id])
+  id     Int  @id @default(autoincrement())
+  shopId Int
+  shop   Shop @relation(fields: [shopId], references: [id])
 
   shopifyCustomerId String
   name              String?
@@ -46,16 +62,16 @@ model Customer {
   loyaltyPoints     Int      @default(0)
   createdAt         DateTime @default(now())
 
-  transactions      PointTransaction[]
-  rewards           Reward[]
+  transactions PointTransaction[]
+  rewards      Reward[]
 
   @@unique([shopId, shopifyCustomerId])
 }
 
 model PointTransaction {
-  id              Int      @id @default(autoincrement())
-  customerId      Int
-  customer        Customer @relation(fields: [customerId], references: [id])
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  customer   Customer @relation(fields: [customerId], references: [id])
 
   points          Int
   transactionType String
@@ -64,22 +80,23 @@ model PointTransaction {
 }
 
 model Reward {
-  id             Int      @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
-  customerId     Int
-  customer       Customer @relation(fields: [customerId], references: [id])
+  customerId Int
+  customer   Customer @relation(fields: [customerId], references: [id])
 
-  rewardCode     String   @unique
+  rewardCode     String @unique
   discountAmount Float
 
-  pointsUsed     Int
+  pointsUsed Int
 
-  status         String   @default("active")
+  status String @default("active")
 
-  expiresAt      DateTime?
+  expiresAt DateTime?
 
-  createdAt      DateTime @default(now())
+  createdAt DateTime @default(now())
 }
+
 model WebhookLog {
   id        Int      @id @default(autoincrement())
   topic     String

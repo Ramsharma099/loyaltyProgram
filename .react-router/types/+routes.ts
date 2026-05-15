@@ -49,12 +49,18 @@ type Pages = {
   "/app/additional": {
     params: {};
   };
+  "/app/customers": {
+    params: {};
+  };
+  "/app/settings": {
+    params: {};
+  };
 };
 
 type RouteFiles = {
   "root.jsx": {
     id: "root";
-    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/paid" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional";
+    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/paid" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional" | "/app/customers" | "/app/settings";
   };
   "routes/webhooks.app.scopes_update.jsx": {
     id: "routes/webhooks.app.scopes_update";
@@ -98,11 +104,19 @@ type RouteFiles = {
   };
   "routes/app.jsx": {
     id: "routes/app";
-    page: "/app" | "/app/additional";
+    page: "/app" | "/app/additional" | "/app/customers" | "/app/settings";
   };
   "routes/app.additional.jsx": {
     id: "routes/app.additional";
     page: "/app/additional";
+  };
+  "routes/app.customers.jsx": {
+    id: "routes/app.customers";
+    page: "/app/customers";
+  };
+  "routes/app.settings.jsx": {
+    id: "routes/app.settings";
+    page: "/app/settings";
   };
   "routes/app._index.jsx": {
     id: "routes/app._index";
@@ -124,5 +138,7 @@ type RouteModules = {
   "routes/auth.$": typeof import("./app/routes/auth.$.jsx");
   "routes/app": typeof import("./app/routes/app.jsx");
   "routes/app.additional": typeof import("./app/routes/app.additional.jsx");
+  "routes/app.customers": typeof import("./app/routes/app.customers.jsx");
+  "routes/app.settings": typeof import("./app/routes/app.settings.jsx");
   "routes/app._index": typeof import("./app/routes/app._index.jsx");
 };
