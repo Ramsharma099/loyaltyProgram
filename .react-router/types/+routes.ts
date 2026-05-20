@@ -29,6 +29,9 @@ type Pages = {
   "/webhooks/orders/paid": {
     params: {};
   };
+  "/api/loyalty-balance": {
+    params: {};
+  };
   "/api/redeem-points": {
     params: {};
   };
@@ -60,7 +63,7 @@ type Pages = {
 type RouteFiles = {
   "root.jsx": {
     id: "root";
-    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/paid" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional" | "/app/customers" | "/app/settings";
+    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/paid" | "/api/loyalty-balance" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional" | "/app/customers" | "/app/settings";
   };
   "routes/webhooks.app.scopes_update.jsx": {
     id: "routes/webhooks.app.scopes_update";
@@ -81,6 +84,10 @@ type RouteFiles = {
   "routes/webhooks.orders.paid.jsx": {
     id: "routes/webhooks.orders.paid";
     page: "/webhooks/orders/paid";
+  };
+  "routes/api.loyalty-balance.jsx": {
+    id: "routes/api.loyalty-balance";
+    page: "/api/loyalty-balance";
   };
   "routes/api.redeem-points.jsx": {
     id: "routes/api.redeem-points";
@@ -131,6 +138,7 @@ type RouteModules = {
   "routes/webhooks.app.uninstalled": typeof import("./app/routes/webhooks.app.uninstalled.jsx");
   "routes/webhooks.refunds.create": typeof import("./app/routes/webhooks.refunds.create.jsx");
   "routes/webhooks.orders.paid": typeof import("./app/routes/webhooks.orders.paid.jsx");
+  "routes/api.loyalty-balance": typeof import("./app/routes/api.loyalty-balance.jsx");
   "routes/api.redeem-points": typeof import("./app/routes/api.redeem-points.jsx");
   "routes/api.test-order": typeof import("./app/routes/api.test-order.jsx");
   "routes/auth.login": typeof import("./app/routes/auth.login/route.jsx");
