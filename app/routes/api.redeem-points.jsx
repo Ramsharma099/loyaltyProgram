@@ -316,6 +316,12 @@ async function issueShopifyReward({ admin, customer, selectedReward }) {
 async function createDiscountReward({ admin, customer, selectedReward }) {
   const rewardCode =
     "LOYALTY-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+  const discountTags = [
+    "loyalty",
+    "reward-redemption",
+    `points-${selectedReward.points}`,
+    `discount-${selectedReward.discount}`,
+  ];
 
   const data = await runAdminGraphql(
     admin,
@@ -342,6 +348,7 @@ async function createDiscountReward({ admin, customer, selectedReward }) {
         title: rewardCode,
         code: rewardCode,
         startsAt: new Date().toISOString(),
+        tags: discountTags,
         customerSelection: {
           customers: {
             add: [`gid://shopify/Customer/${customer.shopifyCustomerId}`],
@@ -359,9 +366,9 @@ async function createDiscountReward({ admin, customer, selectedReward }) {
           },
         },
         combinesWith: {
-          orderDiscounts: false,
-          productDiscounts: false,
-          shippingDiscounts: false,
+          orderDiscounts: true,
+          productDiscounts: true,
+          shippingDiscounts: true,
         },
         appliesOncePerCustomer: true,
         usageLimit: 1,
@@ -383,6 +390,7 @@ async function createDiscountReward({ admin, customer, selectedReward }) {
   return {
     rewardCode,
     amount: selectedReward.discount,
+    discountTags,
   };
 }
 

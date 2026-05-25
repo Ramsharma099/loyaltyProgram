@@ -278,8 +278,11 @@ function Extension() {
     }
   };
 
+  const checkoutRewardOptions = rewardOptions.filter(
+    (reward) => reward.type !== "store_credit",
+  );
   const availableRewards = rewardOptions.filter(
-    (reward) => points >= reward.points,
+    (reward) => reward.type !== "store_credit" && points >= reward.points,
   );
 
   return (
@@ -331,7 +334,7 @@ function Extension() {
             </s-text>
 
             <s-stack gap="small">
-              {rewardOptions.map((reward) => {
+              {checkoutRewardOptions.map((reward) => {
                 const rewardValue = getRewardValue(reward);
                 const isSelected = selectedReward === rewardValue;
 
