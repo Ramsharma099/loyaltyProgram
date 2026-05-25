@@ -26,6 +26,9 @@ type Pages = {
   "/webhooks/refunds/create": {
     params: {};
   };
+  "/webhooks/orders/create": {
+    params: {};
+  };
   "/webhooks/orders/paid": {
     params: {};
   };
@@ -63,7 +66,7 @@ type Pages = {
 type RouteFiles = {
   "root.jsx": {
     id: "root";
-    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/paid" | "/api/loyalty-balance" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional" | "/app/customers" | "/app/settings";
+    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/create" | "/webhooks/orders/paid" | "/api/loyalty-balance" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional" | "/app/customers" | "/app/settings";
   };
   "routes/webhooks.app.scopes_update.jsx": {
     id: "routes/webhooks.app.scopes_update";
@@ -80,6 +83,10 @@ type RouteFiles = {
   "routes/webhooks.refunds.create.jsx": {
     id: "routes/webhooks.refunds.create";
     page: "/webhooks/refunds/create";
+  };
+  "routes/webhooks.orders.create.jsx": {
+    id: "routes/webhooks.orders.create";
+    page: "/webhooks/orders/create";
   };
   "routes/webhooks.orders.paid.jsx": {
     id: "routes/webhooks.orders.paid";
@@ -137,6 +144,7 @@ type RouteModules = {
   "routes/webhooks.customers.create": typeof import("./app/routes/webhooks.customers.create.jsx");
   "routes/webhooks.app.uninstalled": typeof import("./app/routes/webhooks.app.uninstalled.jsx");
   "routes/webhooks.refunds.create": typeof import("./app/routes/webhooks.refunds.create.jsx");
+  "routes/webhooks.orders.create": typeof import("./app/routes/webhooks.orders.create.jsx");
   "routes/webhooks.orders.paid": typeof import("./app/routes/webhooks.orders.paid.jsx");
   "routes/api.loyalty-balance": typeof import("./app/routes/api.loyalty-balance.jsx");
   "routes/api.redeem-points": typeof import("./app/routes/api.redeem-points.jsx");

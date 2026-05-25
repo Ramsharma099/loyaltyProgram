@@ -8,6 +8,10 @@ import {
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getLoyaltySettings } from "../services/loyalty-settings.server";
+import {
+  DEFAULT_LOYALTY_SETTINGS,
+  normalizeRewardOptions,
+} from "../services/loyalty-settings.shared";
 
 const SETTING_FIELDS = [
   {
@@ -58,6 +62,12 @@ const RULE_GROUPS = [
   },
 ];
 
+function formatRewardOptions(value) {
+  const rewards = normalizeRewardOptions(value) || [];
+
+  return JSON.stringify(rewards, null, 2);
+}
+
 function parsePositiveInteger(formData, fieldName) {
   const value = Number(formData.get(fieldName));
 
@@ -66,6 +76,12 @@ function parsePositiveInteger(formData, fieldName) {
   }
 
   return value;
+}
+
+function getSettingValue(values, fieldName) {
+  return String(
+    values?.[fieldName] ?? DEFAULT_LOYALTY_SETTINGS[fieldName] ?? "",
+  );
 }
 
 export const loader = async ({ request }) => {
@@ -94,6 +110,16 @@ export const action = async ({ request }) => {
     } else {
       values[field.name] = value;
     }
+  }
+
+  const redemptionRewards = String(formData.get("redemptionRewards") || "");
+  const normalizedRewards = normalizeRewardOptions(redemptionRewards);
+
+  if (!normalizedRewards) {
+    errors.redemptionRewards =
+      'Enter rewards as JSON, for example [{"points":100,"discount":2}].';
+  } else {
+    values.redemptionRewards = JSON.stringify(normalizedRewards);
   }
 
   if (Object.keys(errors).length > 0) {
@@ -135,6 +161,11 @@ export default function LoyaltySettingsPage() {
   const values = actionData?.values || currentSettings;
 
   const errors = actionData?.errors || {};
+  const rewardOptionsText =
+    values.redemptionRewards ||
+    formatRewardOptions(currentSettings.redemptionRewards);
+  const rewardOptions =
+    normalizeRewardOptions(currentSettings.redemptionRewards) || [];
   const fieldsByName = Object.fromEntries(
     SETTING_FIELDS.map((field) => [field.name, field]),
   );
@@ -174,7 +205,7 @@ export default function LoyaltySettingsPage() {
                               min="1"
                               step="1"
                               inputMode="numeric"
-                              defaultValue={String(values[field.name] || "")}
+                              value={getSettingValue(values, field.name)}
                               suffix={field.suffix}
                               details={field.help}
                               error={errors[field.name] || undefined}
@@ -187,6 +218,40 @@ export default function LoyaltySettingsPage() {
                   </s-stack>
                 </s-section>
               ))}
+
+              <s-section heading="Redemption rewards">
+                <s-stack gap="base">
+                  <s-text type="small">
+                    Discount options customers can redeem at checkout.
+                  </s-text>
+
+                  <textarea
+                    name="redemptionRewards"
+                    defaultValue={rewardOptionsText}
+                    rows={8}
+                    required
+                    style={{
+                      boxSizing: "border-box",
+                      width: "100%",
+                      minHeight: "160px",
+                      padding: "12px",
+                      border: errors.redemptionRewards
+                        ? "1px solid #8e1f0b"
+                        : "1px solid #8a8a8a",
+                      borderRadius: "8px",
+                      fontFamily: "monospace",
+                    }}
+                  />
+
+                  {errors.redemptionRewards ? (
+                    <s-text tone="critical">{errors.redemptionRewards}</s-text>
+                  ) : (
+                    <s-text type="small">
+                      Use an array of rewards with points and discount values.
+                    </s-text>
+                  )}
+                </s-stack>
+              </s-section>
 
               <s-stack direction="inline" justifyContent="end">
                 <s-button
@@ -242,6 +307,17 @@ export default function LoyaltySettingsPage() {
                 <s-text type="small">
                   Removed for every refund threshold reached.
                 </s-text>
+              </s-stack>
+            </s-box>
+
+            <s-box padding="base" background="subdued" borderRadius="base">
+              <s-stack gap="small">
+                <s-text type="small">Redemptions</s-text>
+                {rewardOptions.map((reward) => (
+                  <s-text type="strong" key={reward.points}>
+                    {reward.points} points = {reward.discount} discount
+                  </s-text>
+                ))}
               </s-stack>
             </s-box>
           </s-stack>

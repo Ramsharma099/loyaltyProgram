@@ -1,12 +1,13 @@
 import prisma from "../db.server";
+import { DEFAULT_LOYALTY_SETTINGS } from "./loyalty-settings.shared";
 
-export const DEFAULT_LOYALTY_SETTINGS = {
-  signupBonusPoints: 100,
-  orderSpendAmount: 100,
-  orderSpendPoints: 10,
-  refundSpendAmount: 100,
-  refundSpendPoints: 10,
-};
+export {
+  DEFAULT_LOYALTY_SETTINGS,
+  DEFAULT_REWARD_OPTIONS,
+  SPECIAL_REWARD_OPTIONS,
+  getRewardOptionsWithSpecials,
+  normalizeRewardOptions,
+} from "./loyalty-settings.shared";
 
 export async function findOrCreateShop(shopDomain) {
   let shop = await prisma.shop.findUnique({

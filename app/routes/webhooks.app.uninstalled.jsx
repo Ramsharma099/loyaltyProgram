@@ -11,8 +11,6 @@ export const action = async ({ request }) => {
       },
     });
 
-    console.log("Shop removed:", shop);
-
     return new Response("App uninstalled");
   } catch (error) {
     console.error(error);

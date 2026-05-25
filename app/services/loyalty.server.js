@@ -14,7 +14,6 @@ export async function addSignupBonus(shopDomain, customerData) {
     });
 
     if (customer) {
-      console.log("Customer already exists");
       return customer;
     }
 
@@ -38,8 +37,6 @@ export async function addSignupBonus(shopDomain, customerData) {
         reason: "Signup Bonus",
       },
     });
-
-    console.log("Signup bonus added");
 
     return customer;
   } catch (error) {

@@ -21,7 +21,7 @@ export const action = async ({ request }) => {
       status: 200,
     });
   } catch (error) {
-    console.error("[orders/paid] Webhook error", error);
+    console.error("[orders/create] Webhook error", error);
 
     return new Response("Webhook Error", {
       status: 500,

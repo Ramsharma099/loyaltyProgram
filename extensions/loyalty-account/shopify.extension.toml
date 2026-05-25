@@ -1,0 +1,31 @@
+# Learn more about configuring your customer account UI extension:
+# https://shopify.dev/docs/api/customer-account-ui-extensions/latest/configuration
+
+api_version = "2026-04"
+
+[[extensions]]
+name = "loyalty-account"
+handle = "loyalty-account"
+type = "ui_extension"
+uid = "8ea3c599-0904-df5e-db42-642a579c982e53dc2001"
+
+[[extensions.targeting]]
+module = "./src/CustomerAccount.jsx"
+target = "customer-account.order-index.block.render"
+default_placement = "ORDER_INDEX"
+
+[[extensions.targeting]]
+module = "./src/CustomerAccount.jsx"
+target = "customer-account.profile.block.render"
+default_placement = "PROFILE1"
+
+[extensions.capabilities]
+api_access = true
+network_access = true
+
+[extensions.settings]
+[[extensions.settings.fields]]
+key = "api_base_url"
+type = "single_line_text_field"
+name = "API base URL"
+description = "HTTPS URL of the app backend, for example the Shopify CLI tunnel URL."

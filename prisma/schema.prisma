@@ -46,6 +46,7 @@ model LoyaltySetting {
   orderSpendPoints  Int @default(10)
   refundSpendAmount Int @default(100)
   refundSpendPoints Int @default(10)
+  redemptionRewards String @default("[{\"points\":100,\"discount\":2},{\"points\":250,\"discount\":5},{\"points\":500,\"discount\":10}]")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

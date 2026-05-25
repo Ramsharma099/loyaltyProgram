@@ -1,82 +1,36 @@
-import prisma from "../db.server";
-import {
-  calculateSpendPoints,
-  getLoyaltySettings,
-} from "../services/loyalty-settings.server";
+import { addOrderRewardPoints } from "../services/order-points.server";
 
 export const loader = async () => {
   try {
     const shopDomain = "hydrogen-jey.myshopify.com";
 
-    const { shop, settings } = await getLoyaltySettings(shopDomain);
-
-    // sample order data
-    const order = {
-      customerId: "123456",
-      name: "Ashwanth",
-      email: "ashwanth@test.com",
-      totalPrice: 1250,
+    const payload = {
+      id: Date.now(),
+      admin_graphql_api_id: `gid://shopify/Order/test-${Date.now()}`,
+      name: "#TEST-LOYALTY",
+      current_total_price: "1250.00",
+      total_price: "1250.00",
+      financial_status: "paid",
+      customer: {
+        id: "9165706985700",
+        first_name: "Test",
+        last_name: "Customer",
+        email: "test-customer@example.com",
+      },
     };
 
-    const points = calculateSpendPoints(
-      order.totalPrice,
-      settings.orderSpendAmount,
-      settings.orderSpendPoints,
-    );
-
-    // find customer
-    let customer = await prisma.customer.findFirst({
-      where: {
-        shopId: shop.id,
-        shopifyCustomerId: order.customerId,
-      },
-    });
-
-    // create customer if not exists
-    if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
-          shopId: shop.id,
-          shopifyCustomerId: order.customerId,
-          name: order.name,
-          email: order.email,
-          loyaltyPoints: points,
-        },
-      });
-    } else {
-      customer = await prisma.customer.update({
-        where: {
-          id: customer.id,
-        },
-        data: {
-          loyaltyPoints: {
-            increment: points,
-          },
-        },
-      });
-    }
-
-    // create transaction
-    await prisma.pointTransaction.create({
-      data: {
-        customerId: customer.id,
-        points,
-        transactionType: "credit",
-        reason: "Order Reward",
-      },
-    });
+    const result = await addOrderRewardPoints(shopDomain, payload);
 
     return Response.json({
       success: true,
-      pointsAdded: points,
-      customer,
+      result,
     });
   } catch (error) {
-    console.error(error);
+    console.error("[api/test-order] Manual order reward test failed", error);
 
     return Response.json({
       success: false,
-      error,
+      error: error.message,
     });
   }
 };

@@ -2,15 +2,10 @@ import { authenticate } from "../shopify.server";
 import { addSignupBonus } from "../services/loyalty.server";
 
 export const action = async ({ request }) => {
-  const { topic, shop, payload } = await authenticate.webhook(request);
-
-  console.log("Webhook received:", topic);
-  console.log("Shop:", shop);
+  const { shop, payload } = await authenticate.webhook(request);
 
   try {
     if (!payload?.id) {
-      console.log("No customer payload found");
-
       return new Response("No customer", {
         status: 200,
       });
