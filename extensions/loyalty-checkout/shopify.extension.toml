@@ -48,3 +48,21 @@ key = "api_base_url"
 type = "single_line_text_field"
 name = "API base URL"
 description = "HTTPS URL of the app backend, for example the Shopify CLI tunnel URL."
+
+[[extensions.settings.fields]]
+key = "login_message"
+type = "single_line_text_field"
+name = "Login message"
+description = "Suggested: \"Please login to view your available coupons\""
+
+[[extensions.settings.fields]]
+key = "description"
+type = "single_line_text_field"
+name = "Description"
+description = "Suggested: \"You have {{coupon_amount}} available discounts\""
+
+[[extensions.settings.fields]]
+key = "discount_prompt"
+type = "single_line_text_field"
+name = "Dropdown choose choose discount"
+description = "Suggested: \"Choose a discount\""

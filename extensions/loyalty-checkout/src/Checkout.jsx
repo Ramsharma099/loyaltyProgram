@@ -34,6 +34,24 @@ const DEFAULT_REWARD_OPTIONS = [
   },
 ];
 
+const DEFAULT_LOGIN_MESSAGE = "Sign in to use loyalty points.";
+const DEFAULT_DESCRIPTION = "You have {coupon_amount} available discounts";
+const DEFAULT_DISCOUNT_PROMPT = "Choose a discount";
+
+function getSettingValue(settings, key, fallback) {
+  const value = settings?.[key];
+
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function formatSettingText(value, replacements) {
+  return Object.entries(replacements).reduce((text, [key, replacement]) => {
+    return text
+      .replaceAll(`{${key}}`, String(replacement))
+      .replaceAll(`{{${key}}}`, String(replacement));
+  }, value);
+}
+
 function formatRewardLabel(reward) {
   if (reward.type === "gift_card") {
     return reward.title || `$${reward.amount} Gift Card`;
@@ -114,7 +132,22 @@ function Extension() {
 
   const apiBaseUrl =
     settings?.api_base_url ||
-    "https://youth-franklin-shipping-filed.trycloudflare.com";
+    "https://jerry-hoping-cassette-mailed.trycloudflare.com";
+  const loginMessage = getSettingValue(
+    settings,
+    "login_message",
+    DEFAULT_LOGIN_MESSAGE,
+  );
+  const descriptionTemplate = getSettingValue(
+    settings,
+    "description",
+    DEFAULT_DESCRIPTION,
+  );
+  const discountPrompt = getSettingValue(
+    settings,
+    "discount_prompt",
+    DEFAULT_DISCOUNT_PROMPT,
+  );
 
   const [checkoutCustomer, setCheckoutCustomer] = useState(
     shopify.buyerIdentity.customer.current,
@@ -127,7 +160,8 @@ function Extension() {
 
   const [selectedReward, setSelectedReward] = useState("");
   const [isRedeemOpen, setIsRedeemOpen] = useState(Boolean(checkoutCustomer));
-  const [activePanel, setActivePanel] = useState("rewards");
+  const [isCheckoutRedemptionEnabled, setIsCheckoutRedemptionEnabled] =
+    useState(true);
 
   const [isLoading, setIsLoading] = useState(Boolean(checkoutCustomer));
 
@@ -150,6 +184,7 @@ function Extension() {
       setPoints(0);
       setSelectedReward("");
       setIsRedeemOpen(false);
+      setIsCheckoutRedemptionEnabled(true);
       setMessage("Loyalty API URL is not configured.");
       return;
     }
@@ -160,7 +195,8 @@ function Extension() {
       setPoints(0);
       setSelectedReward("");
       setIsRedeemOpen(false);
-      setMessage("Sign in to use loyalty points.");
+      setIsCheckoutRedemptionEnabled(true);
+      setMessage(loginMessage);
       return;
     }
 
@@ -191,7 +227,10 @@ function Extension() {
         setCustomerId(data.customerId);
         setPoints(data.loyaltyPoints);
         setRewardOptions(normalizeRewardOptions(data.rewardOptions));
-        setIsRedeemOpen(true);
+        setIsCheckoutRedemptionEnabled(
+          data.checkoutRedemptionEnabled !== false,
+        );
+        setIsRedeemOpen(data.checkoutRedemptionEnabled !== false);
       } catch (error) {
         console.error("error on api call", error);
 
@@ -211,20 +250,23 @@ function Extension() {
     return () => {
       isCurrent = false;
     };
-  }, [apiBaseUrl, checkoutCustomer?.id]);
+  }, [apiBaseUrl, checkoutCustomer?.id, loginMessage]);
 
   useEffect(() => {
     if (
       selectedReward &&
-      !rewardOptions.some(
-        (reward) => getRewardValue(reward) === selectedReward,
-      )
+      !rewardOptions.some((reward) => getRewardValue(reward) === selectedReward)
     ) {
       setSelectedReward("");
     }
   }, [rewardOptions, selectedReward]);
 
   const applyPoints = async (rewardToApply) => {
+    if (!isCheckoutRedemptionEnabled) {
+      setMessage("Rewards redemption is disabled in checkout.");
+      return;
+    }
+
     const reward =
       rewardToApply ||
       rewardOptions.find((item) => getRewardValue(item) === selectedReward);
@@ -284,54 +326,29 @@ function Extension() {
   const availableRewards = rewardOptions.filter(
     (reward) => reward.type !== "store_credit" && points >= reward.points,
   );
+  const description = formatSettingText(descriptionTemplate, {
+    coupon_amount: availableRewards.length,
+  });
+
+  if (!isCheckoutRedemptionEnabled) {
+    return null;
+  }
 
   return (
     <s-box border="base" padding="large" cornerRadius="large">
       <s-stack gap="large">
-        <s-grid gridTemplateColumns="1fr 1fr" gap="base">
-          <s-button
-            kind={activePanel === "discounts" ? "primary" : undefined}
-            disabled={isLoading || !customerId}
-            onClick={() => {
-              setActivePanel("discounts");
-              setMessage("");
-            }}
-          >
-            Available Discounts
-          </s-button>
-
-          <s-button
-            kind={activePanel === "rewards" ? "primary" : undefined}
-            disabled={isLoading || !customerId}
-            onClick={() => {
-              setActivePanel("rewards");
-              setIsRedeemOpen(true);
-              setMessage("");
-            }}
-          >
-            Redeem Rewards
-          </s-button>
-        </s-grid>
-
-        {activePanel === "discounts" ? (
-          <s-stack gap="base">
-            <s-text emphasis="bold">Available Discounts</s-text>
-
-            <s-text>
-              {availableRewards.length > 0
-                ? `${availableRewards.length} reward discount${availableRewards.length === 1 ? "" : "s"} available to redeem.`
-                : "No reward discounts are available yet."}
-            </s-text>
-          </s-stack>
-        ) : null}
-
-        {isRedeemOpen && activePanel === "rewards" ? (
+        {isRedeemOpen ? (
           <s-stack gap="base">
             <s-text emphasis="bold">Redeem your Points</s-text>
 
             <s-text>
-              {isLoading ? "Available points loading..." : `Available points ${points}`}
+              {isLoading
+                ? "Available points loading..."
+                : `Available points ${points}`}
             </s-text>
+
+            <s-text appearance="subdued">{description}</s-text>
+            <s-text emphasis="bold">{discountPrompt}</s-text>
 
             <s-stack gap="small">
               {checkoutRewardOptions.map((reward) => {

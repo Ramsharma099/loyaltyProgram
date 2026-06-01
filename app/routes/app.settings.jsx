@@ -7,7 +7,10 @@ import {
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getLoyaltySettings } from "../services/loyalty-settings.server";
+import {
+  filterLoyaltySettingData,
+  getLoyaltySettings,
+} from "../services/loyalty-settings.server";
 import {
   DEFAULT_LOYALTY_SETTINGS,
   normalizeRewardOptions,
@@ -84,6 +87,12 @@ function getSettingValue(values, fieldName) {
   );
 }
 
+function getBooleanSettingValue(values, fieldName) {
+  const value = values?.[fieldName] ?? DEFAULT_LOYALTY_SETTINGS[fieldName];
+
+  return value === true || value === "true";
+}
+
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
 
@@ -114,6 +123,9 @@ export const action = async ({ request }) => {
 
   const redemptionRewards = String(formData.get("redemptionRewards") || "");
   const normalizedRewards = normalizeRewardOptions(redemptionRewards);
+  values.checkoutRedemptionEnabled = formData
+    .getAll("checkoutRedemptionEnabled")
+    .includes("true");
 
   if (!normalizedRewards) {
     errors.redemptionRewards =
@@ -126,7 +138,10 @@ export const action = async ({ request }) => {
     return Response.json(
       {
         errors,
-        values: Object.fromEntries(formData),
+        values: {
+          ...Object.fromEntries(formData),
+          checkoutRedemptionEnabled: values.checkoutRedemptionEnabled,
+        },
       },
       { status: 400 },
     );
@@ -138,7 +153,7 @@ export const action = async ({ request }) => {
     where: {
       shopId: shop.id,
     },
-    data: values,
+    data: filterLoyaltySettingData(values),
   });
 
   return Response.json({
@@ -224,6 +239,35 @@ export default function LoyaltySettingsPage() {
                   <s-text type="small">
                     Discount options customers can redeem at checkout.
                   </s-text>
+
+                  <div
+                    style={{
+                      alignItems: "start",
+                      display: "flex",
+                      gap: "12px",
+                    }}
+                  >
+                    <input
+                      id="checkoutRedemptionEnabled"
+                      type="checkbox"
+                      name="checkoutRedemptionEnabled"
+                      value="true"
+                      defaultChecked={getBooleanSettingValue(
+                        values,
+                        "checkoutRedemptionEnabled",
+                      )}
+                      style={{ marginTop: "3px" }}
+                    />
+                    <span>
+                      <label htmlFor="checkoutRedemptionEnabled">
+                        Allow rewards redemption in checkout
+                      </label>
+                      <s-text type="small">
+                        Turn this off to hide checkout rewards and block
+                        checkout redemption requests.
+                      </s-text>
+                    </span>
+                  </div>
 
                   <textarea
                     name="redemptionRewards"
@@ -313,6 +357,15 @@ export default function LoyaltySettingsPage() {
             <s-box padding="base" background="subdued" borderRadius="base">
               <s-stack gap="small">
                 <s-text type="small">Redemptions</s-text>
+                <s-text type="strong">
+                  Checkout redemption{" "}
+                  {(
+                    currentSettings.checkoutRedemptionEnabled ??
+                    DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled
+                  )
+                    ? "enabled"
+                    : "disabled"}
+                </s-text>
                 {rewardOptions.map((reward) => (
                   <s-text type="strong" key={reward.points}>
                     {reward.points} points = {reward.discount} discount

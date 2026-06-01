@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -41,12 +41,13 @@ model LoyaltySetting {
   shopId Int  @unique
   shop   Shop @relation(fields: [shopId], references: [id])
 
-  signupBonusPoints Int @default(100)
-  orderSpendAmount  Int @default(100)
-  orderSpendPoints  Int @default(10)
-  refundSpendAmount Int @default(100)
-  refundSpendPoints Int @default(10)
-  redemptionRewards String @default("[{\"points\":100,\"discount\":2},{\"points\":250,\"discount\":5},{\"points\":500,\"discount\":10}]")
+  signupBonusPoints         Int     @default(100)
+  orderSpendAmount          Int     @default(100)
+  orderSpendPoints          Int     @default(10)
+  refundSpendAmount         Int     @default(100)
+  refundSpendPoints         Int     @default(10)
+  checkoutRedemptionEnabled Boolean @default(true)
+  redemptionRewards         String  @default("[{\"points\":100,\"discount\":2},{\"points\":250,\"discount\":5},{\"points\":500,\"discount\":10}]")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

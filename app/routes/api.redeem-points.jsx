@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import {
+  DEFAULT_LOYALTY_SETTINGS,
   getRewardOptionsWithSpecials,
 } from "../services/loyalty-settings.server";
 
@@ -11,20 +12,21 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-function isMissingRedemptionRewardsError(error) {
+function isMissingLoyaltySettingFieldError(error) {
   const message = String(error?.message || "");
 
   return (
     error?.code === "P2022" ||
     message.includes("redemptionRewards") ||
+    message.includes("checkoutRedemptionEnabled") ||
     message.includes("Unknown field")
   );
 }
 
-function hasRedemptionRewardsField() {
+function hasLoyaltySettingField(fieldName) {
   const fields = prisma._runtimeDataModel?.models?.LoyaltySetting?.fields || [];
 
-  return fields.some((field) => field.name === "redemptionRewards");
+  return fields.some((field) => field.name === fieldName);
 }
 
 function isStoreCreditPermissionError(error) {
@@ -39,7 +41,7 @@ function isStoreCreditPermissionError(error) {
 }
 
 async function getRewardOptions(shopId) {
-  if (!hasRedemptionRewardsField()) {
+  if (!hasLoyaltySettingField("redemptionRewards")) {
     return getRewardOptionsWithSpecials();
   }
 
@@ -55,11 +57,39 @@ async function getRewardOptions(shopId) {
 
     return getRewardOptionsWithSpecials(settings?.redemptionRewards);
   } catch (error) {
-    if (!isMissingRedemptionRewardsError(error)) {
+    if (!isMissingLoyaltySettingFieldError(error)) {
       throw error;
     }
 
     return getRewardOptionsWithSpecials();
+  }
+}
+
+async function isCheckoutRedemptionEnabled(shopId) {
+  if (!hasLoyaltySettingField("checkoutRedemptionEnabled")) {
+    return DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled;
+  }
+
+  try {
+    const settings = await prisma.loyaltySetting.findUnique({
+      where: {
+        shopId,
+      },
+      select: {
+        checkoutRedemptionEnabled: true,
+      },
+    });
+
+    return (
+      settings?.checkoutRedemptionEnabled ??
+      DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled
+    );
+  } catch (error) {
+    if (!isMissingLoyaltySettingFieldError(error)) {
+      throw error;
+    }
+
+    return DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled;
   }
 }
 
@@ -150,6 +180,19 @@ export const action = async ({ request }) => {
         },
         {
           status: 404,
+          headers: corsHeaders,
+        },
+      );
+    }
+
+    if (!(await isCheckoutRedemptionEnabled(customer.shop.id))) {
+      return Response.json(
+        {
+          success: false,
+          message: "Rewards redemption is disabled in checkout",
+        },
+        {
+          status: 403,
           headers: corsHeaders,
         },
       );

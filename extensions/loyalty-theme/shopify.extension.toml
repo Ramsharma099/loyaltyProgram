@@ -1,0 +1,7 @@
+api_version = "2026-04"
+uid = "d287d703-a474-5168-671b-4e93ccae011fa91e9abd"
+
+[[extensions]]
+name = "Loyalty storefront"
+handle = "loyalty-theme"
+type = "theme"

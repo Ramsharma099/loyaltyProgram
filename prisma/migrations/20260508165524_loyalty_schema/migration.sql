@@ -6,28 +6,28 @@
 
 */
 -- DropIndex
-DROP INDEX "Customer_email_key";
+DROP INDEX `Customer_email_key` ON `Customer`;
 
 -- DropIndex
-DROP INDEX "Customer_shopifyCustomerId_key";
+DROP INDEX `Customer_shopifyCustomerId_key` ON `Customer`;
 
 -- AlterTable
-ALTER TABLE "Customer" ADD COLUMN     "shopId" INTEGER NOT NULL;
+ALTER TABLE `Customer` ADD COLUMN `shopId` INTEGER NOT NULL;
 
 -- CreateTable
-CREATE TABLE "Shop" (
-    "id" SERIAL NOT NULL,
-    "shopDomain" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE `Shop` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `shopDomain` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
-    CONSTRAINT "Shop_pkey" PRIMARY KEY ("id")
+    PRIMARY KEY (`id`)
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Shop_shopDomain_key" ON "Shop"("shopDomain");
+CREATE UNIQUE INDEX `Shop_shopDomain_key` ON `Shop`(`shopDomain`);
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Customer_shopId_shopifyCustomerId_key" ON "Customer"("shopId", "shopifyCustomerId");
+CREATE UNIQUE INDEX `Customer_shopId_shopifyCustomerId_key` ON `Customer`(`shopId`, `shopifyCustomerId`);
 
 -- AddForeignKey
-ALTER TABLE "Customer" ADD CONSTRAINT "Customer_shopId_fkey" FOREIGN KEY ("shopId") REFERENCES "Shop"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `Customer` ADD CONSTRAINT `Customer_shopId_fkey` FOREIGN KEY (`shopId`) REFERENCES `Shop`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;

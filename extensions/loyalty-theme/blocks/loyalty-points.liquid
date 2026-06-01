@@ -1,0 +1,132 @@
+{% liquid
+  assign customer_id = ''
+  if customer
+    assign customer_id = customer.id
+  endif
+
+  assign accent_color = block.settings.accent_color | default: '#111827'
+%}
+
+<div
+  class="loyalty-points-widget"
+  style="--loyalty-accent-color: {{ accent_color }};"
+  data-loyalty-points-widget
+  data-api-base-url="{{ block.settings.api_base_url | escape }}"
+  data-shop-domain="{{ shop.permanent_domain | escape }}"
+  data-customer-id="{{ customer_id }}"
+  data-logged-in="{% if customer %}true{% else %}false{% endif %}"
+  data-heading="{{ block.settings.heading | escape }}"
+  data-loading-message="{{ block.settings.loading_message | escape }}"
+  data-logged-out-message="{{ block.settings.logged_out_message | escape }}"
+  data-error-message="{{ block.settings.error_message | escape }}"
+  data-points-template="{{ block.settings.points_template | escape }}"
+  data-rewards-heading="{{ block.settings.rewards_heading | escape }}"
+  data-no-rewards-message="{{ block.settings.no_rewards_message | escape }}"
+  data-show-rewards="{{ block.settings.show_rewards }}"
+>
+  <div class="loyalty-points-widget__inner">
+    <div class="loyalty-points-widget__header">
+      <p class="loyalty-points-widget__eyebrow">{{ block.settings.eyebrow }}</p>
+      <h2 class="loyalty-points-widget__title">{{ block.settings.heading }}</h2>
+    </div>
+
+    {% if customer %}
+      <p class="loyalty-points-widget__message" data-loyalty-status>
+        {{ block.settings.loading_message }}
+      </p>
+      <div class="loyalty-points-widget__balance" data-loyalty-balance hidden></div>
+      <div class="loyalty-points-widget__rewards" data-loyalty-rewards hidden></div>
+    {% else %}
+      <p class="loyalty-points-widget__message">{{ block.settings.logged_out_message }}</p>
+      {% if block.settings.login_link_label != blank %}
+        <a class="loyalty-points-widget__link" href="{{ routes.account_login_url }}">
+          {{ block.settings.login_link_label }}
+        </a>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+
+{% schema %}
+{
+  "name": "Loyalty points",
+  "target": "section",
+  "stylesheet": "loyalty-points.css",
+  "javascript": "loyalty-points.js",
+  "settings": [
+    {
+      "type": "text",
+      "id": "api_base_url",
+      "label": "API base URL",
+      "default": "https://adequate-wiley-picks-pcs.trycloudflare.com",
+      "info": "HTTPS URL for the app backend."
+    },
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow",
+      "default": "Rewards"
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Your loyalty points"
+    },
+    {
+      "type": "text",
+      "id": "loading_message",
+      "label": "Loading message",
+      "default": "Loading your points..."
+    },
+    {
+      "type": "text",
+      "id": "logged_out_message",
+      "label": "Logged out message",
+      "default": "Sign in to view and use your loyalty points."
+    },
+    {
+      "type": "text",
+      "id": "login_link_label",
+      "label": "Login link label",
+      "default": "Sign in"
+    },
+    {
+      "type": "text",
+      "id": "error_message",
+      "label": "Error message",
+      "default": "We could not load your loyalty points right now."
+    },
+    {
+      "type": "text",
+      "id": "points_template",
+      "label": "Points text",
+      "default": "You have {points} points."
+    },
+    {
+      "type": "checkbox",
+      "id": "show_rewards",
+      "label": "Show available rewards",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "rewards_heading",
+      "label": "Rewards heading",
+      "default": "Available rewards"
+    },
+    {
+      "type": "text",
+      "id": "no_rewards_message",
+      "label": "No rewards message",
+      "default": "Keep earning points to unlock rewards."
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "Accent color",
+      "default": "#111827"
+    }
+  ]
+}
+{% endschema %}

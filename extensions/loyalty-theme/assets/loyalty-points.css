@@ -1,0 +1,87 @@
+.loyalty-points-widget {
+  color: rgb(var(--color-foreground, 18 18 18));
+  margin: 24px 0;
+}
+
+.loyalty-points-widget__inner {
+  border: 1px solid rgba(var(--color-foreground, 18 18 18), 0.14);
+  border-radius: 8px;
+  padding: 20px;
+  background: rgb(var(--color-background, 255 255 255));
+}
+
+.loyalty-points-widget__header {
+  margin-bottom: 14px;
+}
+
+.loyalty-points-widget__eyebrow {
+  margin: 0 0 4px;
+  color: var(--loyalty-accent-color);
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.loyalty-points-widget__title {
+  margin: 0;
+  font-size: 1.35em;
+  line-height: 1.25;
+}
+
+.loyalty-points-widget__message,
+.loyalty-points-widget__balance {
+  margin: 0;
+}
+
+.loyalty-points-widget__balance {
+  color: var(--loyalty-accent-color);
+  font-size: 1.1em;
+  font-weight: 700;
+}
+
+.loyalty-points-widget__link {
+  display: inline-block;
+  margin-top: 12px;
+  color: var(--loyalty-accent-color);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.loyalty-points-widget__rewards {
+  margin-top: 18px;
+}
+
+.loyalty-points-widget__rewards-title {
+  margin: 0 0 10px;
+  font-size: 1em;
+  font-weight: 700;
+}
+
+.loyalty-points-widget__reward-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.loyalty-points-widget__reward {
+  border: 1px solid rgba(var(--color-foreground, 18 18 18), 0.12);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.loyalty-points-widget__reward-title,
+.loyalty-points-widget__reward-description {
+  margin: 0;
+}
+
+.loyalty-points-widget__reward-title {
+  font-weight: 700;
+}
+
+.loyalty-points-widget__reward-description {
+  margin-top: 4px;
+  opacity: 0.75;
+}

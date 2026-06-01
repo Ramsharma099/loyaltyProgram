@@ -12,18 +12,18 @@
 
 */
 -- AlterTable
-ALTER TABLE "Reward" DROP COLUMN "active",
-DROP COLUMN "pointsRequired",
-DROP COLUMN "rewardName",
-ADD COLUMN     "customerId" INTEGER NOT NULL,
-ADD COLUMN     "discountAmount" DOUBLE PRECISION NOT NULL,
-ADD COLUMN     "expiresAt" TIMESTAMP(3),
-ADD COLUMN     "pointsUsed" INTEGER NOT NULL,
-ADD COLUMN     "rewardCode" TEXT NOT NULL,
-ADD COLUMN     "status" TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE `Reward` DROP COLUMN `active`,
+DROP COLUMN `pointsRequired`,
+DROP COLUMN `rewardName`,
+ADD COLUMN `customerId` INTEGER NOT NULL,
+ADD COLUMN `discountAmount` DOUBLE NOT NULL,
+ADD COLUMN `expiresAt` DATETIME(3),
+ADD COLUMN `pointsUsed` INTEGER NOT NULL,
+ADD COLUMN `rewardCode` VARCHAR(191) NOT NULL,
+ADD COLUMN `status` VARCHAR(191) NOT NULL DEFAULT 'active';
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Reward_rewardCode_key" ON "Reward"("rewardCode");
+CREATE UNIQUE INDEX `Reward_rewardCode_key` ON `Reward`(`rewardCode`);
 
 -- AddForeignKey
-ALTER TABLE "Reward" ADD CONSTRAINT "Reward_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `Reward` ADD CONSTRAINT `Reward_customerId_fkey` FOREIGN KEY (`customerId`) REFERENCES `Customer`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;

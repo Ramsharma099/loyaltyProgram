@@ -46,7 +46,7 @@ function CustomerAccountLoyaltyPoints() {
   const customer = useAuthenticatedAccountCustomer();
   const apiBaseUrl =
     settings?.api_base_url ||
-    "https://youth-franklin-shipping-filed.trycloudflare.com";
+    "https://jerry-hoping-cassette-mailed.trycloudflare.com";
 
   const [points, setPoints] = useState(0);
   const [customerId, setCustomerId] = useState(null);

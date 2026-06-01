@@ -9,6 +9,20 @@ export {
   normalizeRewardOptions,
 } from "./loyalty-settings.shared";
 
+export function hasLoyaltySettingField(fieldName) {
+  const fields = prisma._runtimeDataModel?.models?.LoyaltySetting?.fields || [];
+
+  return fields.some((field) => field.name === fieldName);
+}
+
+export function filterLoyaltySettingData(data) {
+  return Object.fromEntries(
+    Object.entries(data).filter(([fieldName]) =>
+      hasLoyaltySettingField(fieldName),
+    ),
+  );
+}
+
 export async function findOrCreateShop(shopDomain) {
   let shop = await prisma.shop.findUnique({
     where: {
@@ -37,7 +51,7 @@ export async function getLoyaltySettings(shopDomain) {
     update: {},
     create: {
       shopId: shop.id,
-      ...DEFAULT_LOYALTY_SETTINGS,
+      ...filterLoyaltySettingData(DEFAULT_LOYALTY_SETTINGS),
     },
   });
 

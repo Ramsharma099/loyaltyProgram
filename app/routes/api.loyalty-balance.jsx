@@ -1,9 +1,9 @@
 import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import {
+  DEFAULT_LOYALTY_SETTINGS,
   DEFAULT_REWARD_OPTIONS,
   getRewardOptionsWithSpecials,
-  normalizeRewardOptions,
 } from "../services/loyalty-settings.server";
 import {
   ensureOrderWebhookSubscriptions,
@@ -48,20 +48,21 @@ function normalizeShopDomain(shop) {
   }
 }
 
-function isMissingRedemptionRewardsError(error) {
+function isMissingLoyaltySettingFieldError(error) {
   const message = String(error?.message || "");
 
   return (
     error?.code === "P2022" ||
     message.includes("redemptionRewards") ||
+    message.includes("checkoutRedemptionEnabled") ||
     message.includes("Unknown field")
   );
 }
 
-function hasRedemptionRewardsField() {
+function hasLoyaltySettingField(fieldName) {
   const fields = prisma._runtimeDataModel?.models?.LoyaltySetting?.fields || [];
 
-  return fields.some((field) => field.name === "redemptionRewards");
+  return fields.some((field) => field.name === fieldName);
 }
 
 function findCustomer(shopifyCustomerId, shopDomain) {
@@ -84,9 +85,18 @@ function findCustomer(shopifyCustomerId, shopDomain) {
 }
 
 async function findCustomerWithRewards(shopifyCustomerId, shopDomain) {
-  if (!hasRedemptionRewardsField()) {
+  if (!hasLoyaltySettingField("redemptionRewards")) {
     return findCustomer(shopifyCustomerId, shopDomain);
   }
+
+  const loyaltySettingSelect = {
+    redemptionRewards: true,
+    ...(hasLoyaltySettingField("checkoutRedemptionEnabled")
+      ? {
+          checkoutRedemptionEnabled: true,
+        }
+      : {}),
+  };
 
   try {
     return await prisma.customer.findFirst({
@@ -106,20 +116,50 @@ async function findCustomerWithRewards(shopifyCustomerId, shopDomain) {
         shop: {
           select: {
             loyaltySetting: {
-              select: {
-                redemptionRewards: true,
-              },
+              select: loyaltySettingSelect,
             },
           },
         },
       },
     });
   } catch (error) {
-    if (!isMissingRedemptionRewardsError(error)) {
+    if (!isMissingLoyaltySettingFieldError(error)) {
       throw error;
     }
 
     return findCustomer(shopifyCustomerId, shopDomain);
+  }
+}
+
+async function getCheckoutRedemptionEnabled(shopDomain) {
+  if (!shopDomain || !hasLoyaltySettingField("checkoutRedemptionEnabled")) {
+    return DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled;
+  }
+
+  try {
+    const shop = await prisma.shop.findUnique({
+      where: {
+        shopDomain,
+      },
+      select: {
+        loyaltySetting: {
+          select: {
+            checkoutRedemptionEnabled: true,
+          },
+        },
+      },
+    });
+
+    return (
+      shop?.loyaltySetting?.checkoutRedemptionEnabled ??
+      DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled
+    );
+  } catch (error) {
+    if (!isMissingLoyaltySettingFieldError(error)) {
+      throw error;
+    }
+
+    return DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled;
   }
 }
 
@@ -140,23 +180,31 @@ async function getLoyaltyBalance(customerId, shop) {
   const customer = await findCustomerWithRewards(shopifyCustomerId, shopDomain);
 
   if (!customer) {
+    const checkoutRedemptionEnabled =
+      await getCheckoutRedemptionEnabled(shopDomain);
+
     return json({
       success: true,
       customerId: null,
       loyaltyPoints: 0,
       rewardOptions: getRewardOptionsWithSpecials(),
+      checkoutRedemptionEnabled,
     });
   }
   const rewardOptions =
     getRewardOptionsWithSpecials(
       customer.shop?.loyaltySetting?.redemptionRewards,
     ) || DEFAULT_REWARD_OPTIONS;
+  const checkoutRedemptionEnabled =
+    customer.shop?.loyaltySetting?.checkoutRedemptionEnabled ??
+    DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled;
 
   return json({
     success: true,
     customerId: customer.id,
     loyaltyPoints: customer.loyaltyPoints,
     rewardOptions,
+    checkoutRedemptionEnabled,
   });
 }
 

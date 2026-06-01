@@ -39,6 +39,7 @@ export const DEFAULT_LOYALTY_SETTINGS = {
   orderSpendPoints: 10,
   refundSpendAmount: 100,
   refundSpendPoints: 10,
+  checkoutRedemptionEnabled: true,
   redemptionRewards: JSON.stringify(DEFAULT_REWARD_OPTIONS),
 };
 
