@@ -132,7 +132,7 @@ function Extension() {
 
   const apiBaseUrl =
     settings?.api_base_url ||
-    "https://jerry-hoping-cassette-mailed.trycloudflare.com";
+    "https://franklin-tasks-travis-postposted.trycloudflare.com";
   const loginMessage = getSettingValue(
     settings,
     "login_message",
@@ -303,14 +303,14 @@ function Extension() {
         throw new Error(data.message || "Could not redeem points");
       }
 
-      setPoints((prev) => prev - reward.points);
-
       if (data.reward.rewardType === "store_credit") {
         setMessage("Store credit added. Apply store credit in Payment.");
       } else if (data.reward.rewardType === "gift_card") {
         setMessage(`Gift card created: ${data.reward.rewardCode}`);
       } else {
-        setMessage(`Discount code created: ${data.reward.rewardCode}`);
+        setMessage(
+          `Discount code created: ${data.reward.rewardCode}. Points will be deducted after payment.`,
+        );
       }
     } catch (error) {
       console.error(error);

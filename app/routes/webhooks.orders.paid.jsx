@@ -1,5 +1,8 @@
 import { authenticate } from "../shopify.server";
-import { addOrderRewardPoints } from "../services/order-points.server";
+import {
+  addOrderRewardPoints,
+  settleOrderRedemptions,
+} from "../services/order-points.server";
 
 export const action = async ({ request }) => {
   let webhook;
@@ -16,6 +19,7 @@ export const action = async ({ request }) => {
 
   try {
     await addOrderRewardPoints(shop, payload);
+    await settleOrderRedemptions(shop, payload);
 
     return new Response("Webhook processed", {
       status: 200,

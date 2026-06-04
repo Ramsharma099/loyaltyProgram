@@ -4,6 +4,22 @@ import {
   calculateSpendPoints,
   getLoyaltySettings,
 } from "../services/loyalty-settings.server";
+import {
+  createRewardActivityLog,
+  REWARD_ACTIVITY_TYPES,
+} from "../services/reward-activity.server";
+
+function getOrderId(payload) {
+  return String(
+    payload?.order?.admin_graphql_api_id || payload?.order?.id || "",
+  );
+}
+
+function getOrderName(payload) {
+  return String(
+    payload?.order?.name || payload?.order?.order_number || "",
+  ).trim();
+}
 
 export const action = async ({ request }) => {
   const { payload, shop } = await authenticate.webhook(request);
@@ -17,7 +33,7 @@ export const action = async ({ request }) => {
 
     const refundAmount = Number(payload.order.total_price);
 
-    const { settings } = await getLoyaltySettings(shop);
+    const { shop: loyaltyShop, settings } = await getLoyaltySettings(shop);
     const pointsToDeduct = calculateSpendPoints(
       refundAmount,
       settings.refundSpendAmount,
@@ -26,6 +42,7 @@ export const action = async ({ request }) => {
 
     const customer = await prisma.customer.findFirst({
       where: {
+        shopId: loyaltyShop.id,
         shopifyCustomerId: String(customerData.id),
       },
     });
@@ -34,27 +51,95 @@ export const action = async ({ request }) => {
       return new Response("Customer not found");
     }
 
-    // deduct points
-    await prisma.customer.update({
-      where: {
-        id: customer.id,
-      },
-      data: {
-        loyaltyPoints: {
-          decrement: pointsToDeduct,
+    if (pointsToDeduct > 0) {
+      // deduct points
+      await prisma.customer.update({
+        where: {
+          id: customer.id,
         },
-      },
-    });
+        data: {
+          loyaltyPoints: {
+            decrement: pointsToDeduct,
+          },
+        },
+      });
 
-    // transaction log
-    await prisma.pointTransaction.create({
-      data: {
-        customerId: customer.id,
-        points: pointsToDeduct,
-        transactionType: "debit",
-        reason: "Refund Deduction",
-      },
-    });
+      // transaction log
+      await prisma.pointTransaction.create({
+        data: {
+          customerId: customer.id,
+          points: pointsToDeduct,
+          transactionType: "debit",
+          reason: "Refund Deduction",
+        },
+      });
+    }
+
+    const orderId = getOrderId(payload);
+    const orderName = getOrderName(payload);
+
+    if (orderId) {
+      const redeemedRewards = await prisma.reward.findMany({
+        where: {
+          customerId: customer.id,
+          rewardType: "discount",
+          status: "redeemed",
+          orderId,
+        },
+      });
+
+      for (const reward of redeemedRewards) {
+        await prisma.$transaction(async (tx) => {
+          const updatedReward = await tx.reward.updateMany({
+            where: {
+              id: reward.id,
+              status: "redeemed",
+            },
+            data: {
+              status: "refunded",
+            },
+          });
+
+          if (updatedReward.count === 0) {
+            return;
+          }
+
+          await tx.customer.update({
+            where: {
+              id: customer.id,
+            },
+            data: {
+              loyaltyPoints: {
+                increment: reward.pointsUsed,
+              },
+            },
+          });
+
+          await tx.pointTransaction.create({
+            data: {
+              customerId: customer.id,
+              points: reward.pointsUsed,
+              transactionType: "credit",
+              reason: `Reward Points Refunded:${orderId}:${reward.rewardCode}`,
+            },
+          });
+
+          await createRewardActivityLog(tx, {
+            customerId: customer.id,
+            rewardId: reward.id,
+            rewardCode: reward.rewardCode,
+            activityType: REWARD_ACTIVITY_TYPES.POINTS_REFUNDED,
+            message: "Points refunded for a refunded loyalty discount order.",
+            metadata: {
+              orderId,
+              orderName,
+              pointsRefunded: reward.pointsUsed,
+              discountAmount: reward.discountAmount,
+            },
+          });
+        });
+      }
+    }
 
     return new Response("Refund processed");
   } catch (error) {

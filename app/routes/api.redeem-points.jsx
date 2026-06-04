@@ -4,6 +4,13 @@ import {
   DEFAULT_LOYALTY_SETTINGS,
   getRewardOptionsWithSpecials,
 } from "../services/loyalty-settings.server";
+import {
+  createRewardActivityLog,
+  expirePendingDiscountRedemptions,
+  REWARD_ACTIVITY_TYPES,
+  tryCreateRewardActivityLog,
+} from "../services/reward-activity.server";
+import { isRewardsRedemptionEnabled } from "../services/shop-plan.server";
 
 // CORS HEADERS
 const corsHeaders = {
@@ -11,6 +18,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
+const DISCOUNT_EXPIRY_HOURS = 24;
 
 function isMissingLoyaltySettingFieldError(error) {
   const message = String(error?.message || "");
@@ -19,6 +27,9 @@ function isMissingLoyaltySettingFieldError(error) {
     error?.code === "P2022" ||
     message.includes("redemptionRewards") ||
     message.includes("checkoutRedemptionEnabled") ||
+    message.includes("preferredIntegration") ||
+    message.includes("isShopifyPlus") ||
+    message.includes("isPartnerDevelopment") ||
     message.includes("Unknown field")
   );
 }
@@ -65,25 +76,26 @@ async function getRewardOptions(shopId) {
   }
 }
 
-async function isCheckoutRedemptionEnabled(shopId) {
+async function isRewardsRedemptionEnabledForShop(shopId) {
   if (!hasLoyaltySettingField("checkoutRedemptionEnabled")) {
     return DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled;
   }
 
   try {
-    const settings = await prisma.loyaltySetting.findUnique({
+    const shop = await prisma.shop.findUnique({
       where: {
-        shopId,
+        id: shopId,
       },
       select: {
-        checkoutRedemptionEnabled: true,
+        loyaltySetting: {
+          select: {
+            checkoutRedemptionEnabled: true,
+          },
+        },
       },
     });
 
-    return (
-      settings?.checkoutRedemptionEnabled ??
-      DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled
-    );
+    return isRewardsRedemptionEnabled(shop?.loyaltySetting);
   } catch (error) {
     if (!isMissingLoyaltySettingFieldError(error)) {
       throw error;
@@ -141,6 +153,8 @@ export const action = async ({ request }) => {
     });
   }
 
+  let redemptionFailureContext = null;
+
   try {
     const body = await request.json();
 
@@ -185,11 +199,11 @@ export const action = async ({ request }) => {
       );
     }
 
-    if (!(await isCheckoutRedemptionEnabled(customer.shop.id))) {
+    if (!(await isRewardsRedemptionEnabledForShop(customer.shop.id))) {
       return Response.json(
         {
           success: false,
-          message: "Rewards redemption is disabled in checkout",
+          message: "Rewards redemption is disabled",
         },
         {
           status: 403,
@@ -202,6 +216,19 @@ export const action = async ({ request }) => {
 
     // VALIDATE POINTS
     if (customer.loyaltyPoints < redeemPoints) {
+      if (rewardType === "discount") {
+        await tryCreateRewardActivityLog({
+          customerId: customer.id,
+          activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_FAILED,
+          message:
+            "Discount redemption failed because points were insufficient.",
+          metadata: {
+            pointsToRedeem: redeemPoints,
+            availablePoints: customer.loyaltyPoints,
+          },
+        });
+      }
+
       return Response.json(
         {
           success: false,
@@ -214,7 +241,20 @@ export const action = async ({ request }) => {
       );
     }
 
+    await expirePendingDiscountRedemptions();
+
     const rewardOptions = await getRewardOptions(customer.shop.id);
+    const pendingRedemptions = await prisma.reward.aggregate({
+      where: {
+        customerId: customer.id,
+        status: "pending",
+      },
+      _sum: {
+        pointsUsed: true,
+      },
+    });
+    const availablePoints =
+      customer.loyaltyPoints - (pendingRedemptions._sum.pointsUsed || 0);
 
     const selectedReward = rewardOptions.find(
       (reward) =>
@@ -223,6 +263,19 @@ export const action = async ({ request }) => {
     );
 
     if (!selectedReward) {
+      if (rewardType === "discount") {
+        await tryCreateRewardActivityLog({
+          customerId: customer.id,
+          activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_FAILED,
+          message:
+            "Discount redemption failed because the selected reward is not available.",
+          metadata: {
+            pointsToRedeem: redeemPoints,
+            rewardType,
+          },
+        });
+      }
+
       return Response.json(
         {
           success: false,
@@ -235,52 +288,116 @@ export const action = async ({ request }) => {
       );
     }
 
+    redemptionFailureContext = {
+      customerId: customer.id,
+      rewardCode: null,
+      selectedReward,
+      pointsToRedeem: redeemPoints,
+    };
+
+    if (availablePoints < redeemPoints) {
+      if (rewardType === "discount") {
+        await tryCreateRewardActivityLog({
+          customerId: customer.id,
+          activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_FAILED,
+          message:
+            "Discount redemption failed because available points are reserved by pending discounts.",
+          metadata: {
+            pointsToRedeem: redeemPoints,
+            availablePoints,
+          },
+        });
+      }
+
+      return Response.json(
+        {
+          success: false,
+          message: "Insufficient points",
+        },
+        {
+          status: 400,
+          headers: corsHeaders,
+        },
+      );
+    }
+
+    const rewardTypeForStorage = selectedReward.type || "discount";
+    const expiresAt =
+      rewardTypeForStorage === "discount"
+        ? new Date(Date.now() + DISCOUNT_EXPIRY_HOURS * 60 * 60 * 1000)
+        : null;
     const issuedReward = await issueShopifyReward({
       admin,
       customer,
       selectedReward,
+      expiresAt,
     });
+    const shouldDeferPointDeduction = rewardTypeForStorage === "discount";
+    redemptionFailureContext.rewardCode = issuedReward.rewardCode;
 
     // DATABASE TRANSACTION
     const reward = await prisma.$transaction(async (tx) => {
-      // DEDUCT POINTS
-      await tx.customer.update({
-        where: {
-          id: customer.id,
-        },
-
-        data: {
-          loyaltyPoints: {
-            decrement: redeemPoints,
+      if (!shouldDeferPointDeduction) {
+        await tx.customer.update({
+          where: {
+            id: customer.id,
           },
-        },
-      });
 
-      // TRANSACTION HISTORY
-      await tx.pointTransaction.create({
-        data: {
-          customerId: customer.id,
+          data: {
+            loyaltyPoints: {
+              decrement: redeemPoints,
+            },
+          },
+        });
 
-          points: redeemPoints,
+        await tx.pointTransaction.create({
+          data: {
+            customerId: customer.id,
 
-          transactionType: "debit",
+            points: redeemPoints,
 
-          reason: "Reward Redemption",
-        },
-      });
+            transactionType: "debit",
+
+            reason: "Reward Redemption",
+          },
+        });
+      }
 
       // SAVE REWARD
-      return tx.reward.create({
+      const createdReward = await tx.reward.create({
         data: {
           customerId: customer.id,
 
           rewardCode: issuedReward.rewardCode,
 
           discountAmount: issuedReward.amount,
+          rewardType: rewardTypeForStorage,
+          shopifyRewardId: issuedReward.shopifyRewardId,
 
           pointsUsed: redeemPoints,
+
+          status: shouldDeferPointDeduction ? "pending" : "active",
+          expiresAt,
         },
       });
+
+      if (shouldDeferPointDeduction) {
+        await createRewardActivityLog(tx, {
+          customerId: customer.id,
+          rewardId: createdReward.id,
+          rewardCode: createdReward.rewardCode,
+          activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_CREATED,
+          message: "Discount created and waiting for order payment.",
+          metadata: {
+            discountAmount: issuedReward.amount,
+            pointsUsed: redeemPoints,
+            shopifyRewardId: issuedReward.shopifyRewardId,
+            expiresAt,
+          },
+        });
+      }
+
+      return createdReward;
     });
 
     return Response.json(
@@ -315,6 +432,23 @@ export const action = async ({ request }) => {
 
     console.error("Redeem error:", error, error?.stack);
 
+    if (
+      redemptionFailureContext &&
+      (redemptionFailureContext.selectedReward?.type || "discount") ===
+        "discount"
+    ) {
+      await tryCreateRewardActivityLog({
+        customerId: redemptionFailureContext.customerId,
+        rewardCode: redemptionFailureContext.rewardCode,
+        activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_FAILED,
+        message: error?.message || "Could not create discount code.",
+        metadata: {
+          pointsToRedeem: redemptionFailureContext.pointsToRedeem,
+          selectedReward: redemptionFailureContext.selectedReward,
+        },
+      });
+    }
+
     if (isStoreCreditPermissionError(error)) {
       return Response.json(
         {
@@ -342,7 +476,12 @@ export const action = async ({ request }) => {
   }
 };
 
-async function issueShopifyReward({ admin, customer, selectedReward }) {
+async function issueShopifyReward({
+  admin,
+  customer,
+  selectedReward,
+  expiresAt,
+}) {
   const rewardType = selectedReward.type || "discount";
 
   if (rewardType === "gift_card") {
@@ -353,10 +492,15 @@ async function issueShopifyReward({ admin, customer, selectedReward }) {
     return createStoreCreditReward({ admin, customer, selectedReward });
   }
 
-  return createDiscountReward({ admin, customer, selectedReward });
+  return createDiscountReward({ admin, customer, selectedReward, expiresAt });
 }
 
-async function createDiscountReward({ admin, customer, selectedReward }) {
+async function createDiscountReward({
+  admin,
+  customer,
+  selectedReward,
+  expiresAt,
+}) {
   const rewardCode =
     "LOYALTY-" + Math.random().toString(36).substring(2, 8).toUpperCase();
   const discountTags = [
@@ -391,6 +535,7 @@ async function createDiscountReward({ admin, customer, selectedReward }) {
         title: rewardCode,
         code: rewardCode,
         startsAt: new Date().toISOString(),
+        endsAt: expiresAt?.toISOString(),
         tags: discountTags,
         customerSelection: {
           customers: {
@@ -433,6 +578,7 @@ async function createDiscountReward({ admin, customer, selectedReward }) {
   return {
     rewardCode,
     amount: selectedReward.discount,
+    shopifyRewardId: result.codeDiscountNode.id,
     discountTags,
   };
 }

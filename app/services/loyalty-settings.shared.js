@@ -40,6 +40,7 @@ export const DEFAULT_LOYALTY_SETTINGS = {
   refundSpendAmount: 100,
   refundSpendPoints: 10,
   checkoutRedemptionEnabled: true,
+  preferredIntegration: "theme",
   redemptionRewards: JSON.stringify(DEFAULT_REWARD_OPTIONS),
 };
 

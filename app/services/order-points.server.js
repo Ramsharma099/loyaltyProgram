@@ -3,9 +3,19 @@ import {
   calculateSpendPoints,
   getLoyaltySettings,
 } from "./loyalty-settings.server";
+import {
+  createRewardActivityLog,
+  expirePendingDiscountRedemptions,
+  REWARD_ACTIVITY_TYPES,
+  tryCreateRewardActivityLog,
+} from "./reward-activity.server";
 
 function getOrderId(payload) {
   return String(payload?.admin_graphql_api_id || payload?.id || "");
+}
+
+function getOrderName(payload) {
+  return String(payload?.name || payload?.order_number || "").trim();
 }
 
 function getOrderTotal(payload) {
@@ -15,6 +25,30 @@ function getOrderTotal(payload) {
       payload?.subtotal_price ||
       0,
   );
+}
+
+function getDiscountCodes(payload) {
+  const codes = new Set();
+  const addCode = (code) => {
+    if (typeof code === "string" && code.trim()) {
+      codes.add(code.trim());
+    }
+  };
+
+  for (const discount of payload?.discount_codes || []) {
+    addCode(discount?.code);
+  }
+
+  for (const discount of payload?.current_discount_codes || []) {
+    addCode(discount?.code);
+  }
+
+  for (const application of payload?.discount_applications || []) {
+    addCode(application?.code);
+    addCode(application?.title);
+  }
+
+  return Array.from(codes);
 }
 
 function getCustomerName(customerData) {
@@ -119,5 +153,149 @@ export async function addOrderRewardPoints(shopDomain, payload) {
     customer: updatedCustomer,
     points,
     orderTotal,
+  };
+}
+
+export async function settleOrderRedemptions(shopDomain, payload) {
+  const orderId = getOrderId(payload);
+  const orderName = getOrderName(payload);
+  const discountCodes = getDiscountCodes(payload);
+
+  await expirePendingDiscountRedemptions();
+
+  if (!orderId || discountCodes.length === 0) {
+    return {
+      status: "skipped",
+      message: "No loyalty discount codes found",
+      settled: 0,
+    };
+  }
+
+  const shop = await prisma.shop.findUnique({
+    where: {
+      shopDomain,
+    },
+  });
+
+  if (!shop) {
+    return {
+      status: "skipped",
+      message: "Shop not found",
+      settled: 0,
+    };
+  }
+
+  const pendingRewards = await prisma.reward.findMany({
+    where: {
+      rewardCode: {
+        in: discountCodes,
+      },
+      status: "pending",
+      customer: {
+        shopId: shop.id,
+      },
+    },
+    include: {
+      customer: true,
+    },
+  });
+
+  if (pendingRewards.length === 0) {
+    return {
+      status: "skipped",
+      message: "No pending loyalty redemptions found",
+      settled: 0,
+    };
+  }
+
+  const settledRewards = [];
+
+  for (const reward of pendingRewards) {
+    const reason = `Reward Redemption:${orderId}:${reward.rewardCode}`;
+    const appliedAt = new Date();
+
+    let settled;
+
+    try {
+      settled = await prisma.$transaction(async (tx) => {
+        const updatedReward = await tx.reward.updateMany({
+          where: {
+            id: reward.id,
+            status: "pending",
+          },
+          data: {
+            status: "redeemed",
+            orderId,
+            appliedAt,
+          },
+        });
+
+        if (updatedReward.count === 0) {
+          return null;
+        }
+
+        await tx.customer.update({
+          where: {
+            id: reward.customerId,
+          },
+          data: {
+            loyaltyPoints: {
+              decrement: reward.pointsUsed,
+            },
+          },
+        });
+
+        await tx.pointTransaction.create({
+          data: {
+            customerId: reward.customerId,
+            points: reward.pointsUsed,
+            transactionType: "debit",
+            reason,
+          },
+        });
+
+        await createRewardActivityLog(tx, {
+          customerId: reward.customerId,
+          rewardId: reward.id,
+          rewardCode: reward.rewardCode,
+          activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_APPLIED,
+          message: "Discount applied to a paid order.",
+          metadata: {
+            orderId,
+            orderName,
+            pointsUsed: reward.pointsUsed,
+            discountAmount: reward.discountAmount,
+            appliedAt,
+          },
+        });
+
+        return reward;
+      });
+    } catch (error) {
+      await tryCreateRewardActivityLog({
+        customerId: reward.customerId,
+        rewardId: reward.id,
+        rewardCode: reward.rewardCode,
+        activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_FAILED,
+        message: error?.message || "Could not apply discount redemption.",
+        metadata: {
+          orderId,
+          orderName,
+          pointsUsed: reward.pointsUsed,
+        },
+      });
+
+      throw error;
+    }
+
+    if (settled) {
+      settledRewards.push(settled);
+    }
+  }
+
+  return {
+    status: settledRewards.length > 0 ? "settled" : "skipped",
+    settled: settledRewards.length,
+    rewards: settledRewards,
   };
 }

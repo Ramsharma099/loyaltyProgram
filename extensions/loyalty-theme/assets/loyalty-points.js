@@ -146,8 +146,14 @@
         balance.hidden = false;
       }
 
-      if (rewards && Array.isArray(data.rewardOptions)) {
+      if (
+        rewards &&
+        Array.isArray(data.rewardOptions) &&
+        data.checkoutRedemptionEnabled !== false
+      ) {
         renderRewards(rewards, settings, data.rewardOptions, points);
+      } else if (rewards) {
+        rewards.hidden = true;
       }
     } catch (error) {
       console.error("[loyalty-points] Could not load balance", error);

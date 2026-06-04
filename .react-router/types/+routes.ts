@@ -61,12 +61,15 @@ type Pages = {
   "/app/settings": {
     params: {};
   };
+  "/app/history": {
+    params: {};
+  };
 };
 
 type RouteFiles = {
   "root.jsx": {
     id: "root";
-    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/create" | "/webhooks/orders/paid" | "/api/loyalty-balance" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional" | "/app/customers" | "/app/settings";
+    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/create" | "/webhooks/orders/paid" | "/api/loyalty-balance" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional" | "/app/customers" | "/app/settings" | "/app/history";
   };
   "routes/webhooks.app.scopes_update.jsx": {
     id: "routes/webhooks.app.scopes_update";
@@ -118,7 +121,7 @@ type RouteFiles = {
   };
   "routes/app.jsx": {
     id: "routes/app";
-    page: "/app" | "/app/additional" | "/app/customers" | "/app/settings";
+    page: "/app" | "/app/additional" | "/app/customers" | "/app/settings" | "/app/history";
   };
   "routes/app.additional.jsx": {
     id: "routes/app.additional";
@@ -131,6 +134,10 @@ type RouteFiles = {
   "routes/app.settings.jsx": {
     id: "routes/app.settings";
     page: "/app/settings";
+  };
+  "routes/app.history.jsx": {
+    id: "routes/app.history";
+    page: "/app/history";
   };
   "routes/app._index.jsx": {
     id: "routes/app._index";
@@ -156,5 +163,6 @@ type RouteModules = {
   "routes/app.additional": typeof import("./app/routes/app.additional.jsx");
   "routes/app.customers": typeof import("./app/routes/app.customers.jsx");
   "routes/app.settings": typeof import("./app/routes/app.settings.jsx");
+  "routes/app.history": typeof import("./app/routes/app.history.jsx");
   "routes/app._index": typeof import("./app/routes/app._index.jsx");
 };

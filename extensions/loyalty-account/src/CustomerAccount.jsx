@@ -46,7 +46,7 @@ function CustomerAccountLoyaltyPoints() {
   const customer = useAuthenticatedAccountCustomer();
   const apiBaseUrl =
     settings?.api_base_url ||
-    "https://jerry-hoping-cassette-mailed.trycloudflare.com";
+    "https://franklin-tasks-travis-postposted.trycloudflare.com";
 
   const [points, setPoints] = useState(0);
   const [customerId, setCustomerId] = useState(null);
@@ -55,6 +55,7 @@ function CustomerAccountLoyaltyPoints() {
   );
   const [isLoading, setIsLoading] = useState(Boolean(customer?.id));
   const [isRedeeming, setIsRedeeming] = useState(false);
+  const [isRedemptionEnabled, setIsRedemptionEnabled] = useState(true);
   const [message, setMessage] = useState("");
   const pointsLabel = `${points.toLocaleString()} ${points === 1 ? "point" : "points"}`;
   const canRedeemStoreCredit =
@@ -65,6 +66,7 @@ function CustomerAccountLoyaltyPoints() {
       setIsLoading(false);
       setPoints(0);
       setCustomerId(null);
+      setIsRedemptionEnabled(true);
       setMessage("Loyalty API URL is not configured.");
       return;
     }
@@ -73,6 +75,7 @@ function CustomerAccountLoyaltyPoints() {
       setIsLoading(false);
       setPoints(0);
       setCustomerId(null);
+      setIsRedemptionEnabled(true);
       setMessage("Sign in to view loyalty points.");
       return;
     }
@@ -101,6 +104,7 @@ function CustomerAccountLoyaltyPoints() {
 
         setCustomerId(data.customerId);
         setPoints(data.loyaltyPoints || 0);
+        setIsRedemptionEnabled(data.checkoutRedemptionEnabled !== false);
         setStoreCreditReward(
           normalizeStoreCreditReward(
             data.rewardOptions?.find(
@@ -133,6 +137,11 @@ function CustomerAccountLoyaltyPoints() {
   const redeemStoreCredit = async () => {
     if (!customerId) {
       setMessage("Loyalty customer is not available.");
+      return;
+    }
+
+    if (!isRedemptionEnabled) {
+      setMessage("Rewards redemption is currently disabled.");
       return;
     }
 
@@ -204,11 +213,21 @@ function CustomerAccountLoyaltyPoints() {
 
             <s-button
               kind="primary"
-              disabled={isLoading || isRedeeming || !canRedeemStoreCredit}
+              disabled={
+                isLoading ||
+                isRedeeming ||
+                !isRedemptionEnabled ||
+                !canRedeemStoreCredit
+              }
               onClick={redeemStoreCredit}
             >
               {isRedeeming ? "Redeeming..." : "Redeem store credit"}
             </s-button>
+            {!isRedemptionEnabled ? (
+              <s-text appearance="subdued">
+                Rewards redemption is currently disabled.
+              </s-text>
+            ) : null}
           </s-stack>
         </s-box>
 

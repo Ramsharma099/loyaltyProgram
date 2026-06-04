@@ -30,6 +30,9 @@ model Session {
 model Shop {
   id         Int      @id @default(autoincrement())
   shopDomain String   @unique
+  shopifyPlanName String?
+  isShopifyPlus Boolean @default(false)
+  isPartnerDevelopment Boolean @default(false)
   createdAt  DateTime @default(now())
 
   customers      Customer[]
@@ -47,6 +50,7 @@ model LoyaltySetting {
   refundSpendAmount         Int     @default(100)
   refundSpendPoints         Int     @default(10)
   checkoutRedemptionEnabled Boolean @default(true)
+  preferredIntegration      String  @default("theme")
   redemptionRewards         String  @default("[{\"points\":100,\"discount\":2},{\"points\":250,\"discount\":5},{\"points\":500,\"discount\":10}]")
 
   createdAt DateTime @default(now())
@@ -66,6 +70,7 @@ model Customer {
 
   transactions PointTransaction[]
   rewards      Reward[]
+  rewardActivityLogs RewardActivityLog[]
 
   @@unique([shopId, shopifyCustomerId])
 }
@@ -89,14 +94,44 @@ model Reward {
 
   rewardCode     String @unique
   discountAmount Float
+  rewardType     String @default("discount")
+  shopifyRewardId String?
 
   pointsUsed Int
 
   status String @default("active")
 
   expiresAt DateTime?
+  orderId   String?
+  appliedAt DateTime?
+  failedReason String? @db.Text
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activityLogs RewardActivityLog[]
+}
+
+model RewardActivityLog {
+  id Int @id @default(autoincrement())
+
+  customerId Int?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  rewardId Int?
+  reward   Reward? @relation(fields: [rewardId], references: [id])
+
+  rewardCode   String?
+  activityType String
+  message      String? @db.Text
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([customerId])
+  @@index([rewardId])
+  @@index([rewardCode])
+  @@index([activityType])
 }
 
 model WebhookLog {
