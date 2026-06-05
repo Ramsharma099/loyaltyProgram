@@ -28,12 +28,12 @@ model Session {
 }
 
 model Shop {
-  id         Int      @id @default(autoincrement())
-  shopDomain String   @unique
-  shopifyPlanName String?
-  isShopifyPlus Boolean @default(false)
-  isPartnerDevelopment Boolean @default(false)
-  createdAt  DateTime @default(now())
+  id                   Int      @id @default(autoincrement())
+  shopDomain           String   @unique
+  shopifyPlanName      String?
+  isShopifyPlus        Boolean  @default(false)
+  isPartnerDevelopment Boolean  @default(false)
+  createdAt            DateTime @default(now())
 
   customers      Customer[]
   loyaltySetting LoyaltySetting?
@@ -51,7 +51,38 @@ model LoyaltySetting {
   refundSpendPoints         Int     @default(10)
   checkoutRedemptionEnabled Boolean @default(true)
   preferredIntegration      String  @default("theme")
-  redemptionRewards         String  @default("[{\"points\":100,\"discount\":2},{\"points\":250,\"discount\":5},{\"points\":500,\"discount\":10}]")
+  redemptionRewards         String  @db.Text
+
+  // Checkout UI Text Settings
+  checkoutLoginMessage      String  @default("Sign in to use loyalty points.") @db.VarChar(500)
+  checkoutDescription       String  @default("You have {coupon_amount} available {reward_label}") @db.VarChar(500)
+  checkoutRewardPrompt      String  @default("Choose a {reward_singular}") @db.VarChar(500)
+  checkoutRedeemButtonText  String  @default("Redeem") @db.VarChar(500)
+  checkoutRedeemingText     String  @default("Redeeming...") @db.VarChar(500)
+  checkoutPointsLabel       String  @default("Available points") @db.VarChar(500)
+  checkoutSelectRewardMsg   String  @default("Please select a reward.") @db.VarChar(500)
+  checkoutNotEnoughPtsMsg   String  @default("Not enough points for this reward.") @db.VarChar(500)
+  checkoutDisabledMsg       String  @default("Rewards redemption is disabled in checkout.") @db.VarChar(500)
+  checkoutRedemptionTitle   String  @default("Redeem your Points") @db.VarChar(500)
+  checkoutGiftCardMsg       String  @default("Gift card created: {rewardCode}") @db.VarChar(500)
+  checkoutDiscountMsg       String  @default("Discount code created: {rewardCode}. Points will be deducted after payment.") @db.VarChar(500)
+  checkoutErrorMsg          String  @default("Could not redeem points") @db.VarChar(500)
+  checkoutLoadingMsg        String  @default("Available points loading...") @db.VarChar(500)
+  checkoutAvailableRewardsMsg String  @default("{reward_count} available {reward_label}") @db.VarChar(500)
+
+  // Customer Account UI Text Settings
+  accountLoginMessage       String  @default("Sign in to view loyalty points.") @db.VarChar(500)
+  accountBalanceTitle       String  @default("Loyalty balance") @db.VarChar(500)
+  accountAvailableLabel     String  @default("Available points") @db.VarChar(500)
+  accountCurrentBalance     String  @default("Current balance") @db.VarChar(500)
+  accountLoadingText        String  @default("Loading...") @db.VarChar(500)
+  accountRedeemingText      String  @default("Redeeming...") @db.VarChar(500)
+  accountRedeemButtonText   String  @default("Redeem gift card") @db.VarChar(500)
+  accountDisabledMsg        String  @default("Rewards redemption is currently disabled.") @db.VarChar(500)
+  accountNotEnoughPtsMsg    String  @default("Earn {remaining_points} more points to redeem a gift card.") @db.VarChar(500)
+  accountGiftCardMsg        String  @default("Gift card created: {rewardCode}") @db.VarChar(500)
+  accountErrorMsg           String  @default("Could not redeem gift card") @db.VarChar(500)
+  accountConfigErrorMsg     String  @default("Loyalty API URL is not configured.") @db.VarChar(500)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -68,8 +99,8 @@ model Customer {
   loyaltyPoints     Int      @default(0)
   createdAt         DateTime @default(now())
 
-  transactions PointTransaction[]
-  rewards      Reward[]
+  transactions       PointTransaction[]
+  rewards            Reward[]
   rewardActivityLogs RewardActivityLog[]
 
   @@unique([shopId, shopifyCustomerId])
@@ -92,19 +123,19 @@ model Reward {
   customerId Int
   customer   Customer @relation(fields: [customerId], references: [id])
 
-  rewardCode     String @unique
-  discountAmount Float
-  rewardType     String @default("discount")
+  rewardCode      String  @unique
+  discountAmount  Float
+  rewardType      String  @default("discount")
   shopifyRewardId String?
 
   pointsUsed Int
 
   status String @default("active")
 
-  expiresAt DateTime?
-  orderId   String?
-  appliedAt DateTime?
-  failedReason String? @db.Text
+  expiresAt    DateTime?
+  orderId      String?
+  appliedAt    DateTime?
+  failedReason String?   @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

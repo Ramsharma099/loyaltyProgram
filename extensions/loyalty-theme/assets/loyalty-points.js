@@ -1,4 +1,6 @@
 (function () {
+  var REWARD_TYPE_PREFERENCES = ["gift_card", "discount", "both"];
+
   function formatTemplate(template, replacements) {
     return Object.entries(replacements).reduce(function (text, entry) {
       var key = entry[0];
@@ -10,13 +12,27 @@
     }, template || "");
   }
 
+  function normalizeRewardTypePreference(value) {
+    return REWARD_TYPE_PREFERENCES.indexOf(value) >= 0 ? value : "both";
+  }
+
+  function filterRewardsByPreference(rewards, preference) {
+    var normalizedPreference = normalizeRewardTypePreference(preference);
+
+    return rewards.filter(function (reward) {
+      var type = reward.type || "discount";
+
+      if (normalizedPreference === "both") {
+        return type === "discount" || type === "gift_card";
+      }
+
+      return type === normalizedPreference;
+    });
+  }
+
   function rewardTitle(reward) {
     if (reward.type === "gift_card") {
       return reward.title || "$" + reward.amount + " Gift Card";
-    }
-
-    if (reward.type === "store_credit") {
-      return reward.title || "Store Credit Reward";
     }
 
     return "Discount $" + reward.discount + " for " + reward.points + " points";
@@ -29,10 +45,6 @@
 
     if (reward.type === "gift_card") {
       return "Redeem " + reward.points + " points for this gift card.";
-    }
-
-    if (reward.type === "store_credit") {
-      return "Redeem " + reward.points + " points for store credit.";
     }
 
     return "Redeem " + reward.points + " points for a discount.";
@@ -134,24 +146,28 @@
       }
 
       var points = Number(data.loyaltyPoints || 0);
+      var rewardOptions = Array.isArray(data.rewardOptions)
+        ? filterRewardsByPreference(
+            data.rewardOptions,
+            data.rewardTypePreference,
+          )
+        : [];
 
       if (status) status.hidden = true;
       if (balance) {
         balance.textContent = formatTemplate(settings.pointsTemplate, {
           points: points,
-          reward_count: Array.isArray(data.rewardOptions)
-            ? data.rewardOptions.length
-            : 0,
+          reward_count: rewardOptions.length,
         });
         balance.hidden = false;
       }
 
       if (
         rewards &&
-        Array.isArray(data.rewardOptions) &&
+        rewardOptions.length > 0 &&
         data.checkoutRedemptionEnabled !== false
       ) {
-        renderRewards(rewards, settings, data.rewardOptions, points);
+        renderRewards(rewards, settings, rewardOptions, points);
       } else if (rewards) {
         rewards.hidden = true;
       }

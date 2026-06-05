@@ -53,16 +53,88 @@ description = "HTTPS URL of the app backend, for example the Shopify CLI tunnel 
 key = "login_message"
 type = "single_line_text_field"
 name = "Login message"
-description = "Suggested: \"Please login to view your available coupons\""
+description = "Message shown when customer is not logged in."
 
 [[extensions.settings.fields]]
 key = "description"
 type = "single_line_text_field"
 name = "Description"
-description = "Suggested: \"You have {{coupon_amount}} available discounts\""
+description = "Description text. Use {coupon_amount} and {reward_label} placeholders."
 
 [[extensions.settings.fields]]
 key = "discount_prompt"
 type = "single_line_text_field"
-name = "Dropdown choose choose discount"
-description = "Suggested: \"Choose a discount\""
+name = "Reward selection prompt"
+description = "Prompt to select a reward. Use {reward_singular} placeholder."
+
+[[extensions.settings.fields]]
+key = "checkoutRedeemButtonText"
+type = "single_line_text_field"
+name = "Redeem button text"
+description = "Text for the redeem button."
+
+[[extensions.settings.fields]]
+key = "checkoutRedeemingText"
+type = "single_line_text_field"
+name = "Redeeming state text"
+description = "Text shown while redeeming is in progress."
+
+[[extensions.settings.fields]]
+key = "checkoutPointsLabel"
+type = "single_line_text_field"
+name = "Available points label"
+description = "Label for available points display."
+
+[[extensions.settings.fields]]
+key = "checkoutSelectRewardMsg"
+type = "single_line_text_field"
+name = "Select reward message"
+description = "Message when user needs to select a reward."
+
+[[extensions.settings.fields]]
+key = "checkoutNotEnoughPtsMsg"
+type = "single_line_text_field"
+name = "Not enough points message"
+description = "Message when customer doesn't have enough points."
+
+[[extensions.settings.fields]]
+key = "checkoutDisabledMsg"
+type = "single_line_text_field"
+name = "Redemption disabled message"
+description = "Message when checkout redemption is disabled."
+
+[[extensions.settings.fields]]
+key = "checkoutRedemptionTitle"
+type = "single_line_text_field"
+name = "Redemption section title"
+description = "Title for the redeem points section."
+
+[[extensions.settings.fields]]
+key = "checkoutGiftCardMsg"
+type = "single_line_text_field"
+name = "Gift card success message"
+description = "Success message for gift card redemption. Use {rewardCode} placeholder."
+
+[[extensions.settings.fields]]
+key = "checkoutDiscountMsg"
+type = "single_line_text_field"
+name = "Discount success message"
+description = "Success message for discount redemption. Use {rewardCode} placeholder."
+
+[[extensions.settings.fields]]
+key = "checkoutErrorMsg"
+type = "single_line_text_field"
+name = "Redemption error message"
+description = "Generic error message when redemption fails."
+
+[[extensions.settings.fields]]
+key = "checkoutLoadingMsg"
+type = "single_line_text_field"
+name = "Loading message"
+description = "Message shown while loading points."
+
+[[extensions.settings.fields]]
+key = "checkoutAvailableRewardsMsg"
+type = "single_line_text_field"
+name = "Available rewards message"
+description = "Message shown below reward list. Use {reward_count} and {reward_label} placeholders."

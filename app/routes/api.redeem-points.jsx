@@ -2,7 +2,7 @@ import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import {
   DEFAULT_LOYALTY_SETTINGS,
-  getRewardOptionsWithSpecials,
+  getRewardOptionsForPreference,
 } from "../services/loyalty-settings.server";
 import {
   createRewardActivityLog,
@@ -53,7 +53,7 @@ function isStoreCreditPermissionError(error) {
 
 async function getRewardOptions(shopId) {
   if (!hasLoyaltySettingField("redemptionRewards")) {
-    return getRewardOptionsWithSpecials();
+    return getRewardOptionsForPreference();
   }
 
   try {
@@ -66,13 +66,13 @@ async function getRewardOptions(shopId) {
       },
     });
 
-    return getRewardOptionsWithSpecials(settings?.redemptionRewards);
+    return getRewardOptionsForPreference(settings?.redemptionRewards);
   } catch (error) {
     if (!isMissingLoyaltySettingFieldError(error)) {
       throw error;
     }
 
-    return getRewardOptionsWithSpecials();
+    return getRewardOptionsForPreference();
   }
 }
 

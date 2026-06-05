@@ -6,20 +6,34 @@ import {
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 
-const DEFAULT_STORE_CREDIT_REWARD = {
-  type: "store_credit",
-  points: 100,
-  amount: 1,
-  title: "Store Credit Reward",
-  description: "Redeem 100 points to get $1 store credit",
+const DEFAULT_GIFT_CARD_REWARD = {
+  type: "gift_card",
+  points: 1500,
+  amount: 15,
+  title: "$15 Gift Card",
+  description: "Redeem 1,500 points for a $15 gift card",
 };
 
-function normalizeStoreCreditReward(reward) {
+function getSettingValue(settings, key, fallback) {
+  const value = settings?.[key];
+
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function formatSettingText(value, replacements) {
+  return Object.entries(replacements).reduce((text, [key, replacement]) => {
+    return text
+      .replaceAll(`{${key}}`, String(replacement))
+      .replaceAll(`{{${key}}}`, String(replacement));
+  }, value);
+}
+
+function normalizeGiftCardReward(reward) {
   const points = Number(reward?.points);
   const amount = Number(reward?.amount);
 
   if (
-    reward?.type !== "store_credit" ||
+    reward?.type !== "gift_card" ||
     !Number.isInteger(points) ||
     points < 1 ||
     !Number.isFinite(amount) ||
@@ -29,11 +43,11 @@ function normalizeStoreCreditReward(reward) {
   }
 
   return {
-    type: "store_credit",
+    type: "gift_card",
     points,
     amount,
-    title: reward?.title || DEFAULT_STORE_CREDIT_REWARD.title,
-    description: reward?.description || DEFAULT_STORE_CREDIT_REWARD.description,
+    title: reward?.title || DEFAULT_GIFT_CARD_REWARD.title,
+    description: reward?.description || DEFAULT_GIFT_CARD_REWARD.description,
   };
 }
 
@@ -46,28 +60,82 @@ function CustomerAccountLoyaltyPoints() {
   const customer = useAuthenticatedAccountCustomer();
   const apiBaseUrl =
     settings?.api_base_url ||
-    "https://franklin-tasks-travis-postposted.trycloudflare.com";
+    "https://singh-prospects-introducing-thus.trycloudflare.com";
 
   const [points, setPoints] = useState(0);
   const [customerId, setCustomerId] = useState(null);
-  const [storeCreditReward, setStoreCreditReward] = useState(
-    DEFAULT_STORE_CREDIT_REWARD,
-  );
+  const [giftCardRewards, setGiftCardRewards] = useState([]);
   const [isLoading, setIsLoading] = useState(Boolean(customer?.id));
   const [isRedeeming, setIsRedeeming] = useState(false);
   const [isRedemptionEnabled, setIsRedemptionEnabled] = useState(true);
   const [message, setMessage] = useState("");
+  const [apiTextSettings, setApiTextSettings] = useState({});
   const pointsLabel = `${points.toLocaleString()} ${points === 1 ? "point" : "points"}`;
-  const canRedeemStoreCredit =
-    Boolean(customerId) && points >= storeCreditReward.points;
+
+  // Helper to get text settings - first from API, then from shopify.settings, then default
+  const getTextSetting = (key, fallback) => {
+    return apiTextSettings[key] !== undefined
+      ? apiTextSettings[key]
+      : getSettingValue(settings, key, fallback);
+  };
+
+  const loginMessage = getTextSetting(
+    "accountLoginMessage",
+    "Sign in to view loyalty points.",
+  );
+  const balanceTitle = getTextSetting(
+    "accountBalanceTitle",
+    "Loyalty balance",
+  );
+  const availableLabel = getTextSetting(
+    "accountAvailableLabel",
+    "Available points",
+  );
+  const currentBalanceLabel = getTextSetting(
+    "accountCurrentBalance",
+    "Current balance",
+  );
+  const loadingText = getTextSetting(
+    "accountLoadingText",
+    "Loading...",
+  );
+  const redeemingText = getTextSetting(
+    "accountRedeemingText",
+    "Redeeming...",
+  );
+  const redeemButtonText = getTextSetting(
+    "accountRedeemButtonText",
+    "Redeem gift card",
+  );
+  const disabledMsg = getTextSetting(
+    "accountDisabledMsg",
+    "Rewards redemption is currently disabled.",
+  );
+  const notEnoughPtsMsg = getTextSetting(
+    "accountNotEnoughPtsMsg",
+    "Earn {remaining_points} more points to redeem a gift card.",
+  );
+  const giftCardMsg = getTextSetting(
+    "accountGiftCardMsg",
+    "Gift card created: {rewardCode}",
+  );
+  const errorMsg = getTextSetting(
+    "accountErrorMsg",
+    "Could not redeem gift card",
+  );
+  const configErrorMsg = getTextSetting(
+    "accountConfigErrorMsg",
+    "Loyalty API URL is not configured.",
+  );
 
   useEffect(() => {
     if (!apiBaseUrl) {
       setIsLoading(false);
       setPoints(0);
       setCustomerId(null);
+      setGiftCardRewards([]);
       setIsRedemptionEnabled(true);
-      setMessage("Loyalty API URL is not configured.");
+      setMessage(configErrorMsg);
       return;
     }
 
@@ -75,8 +143,9 @@ function CustomerAccountLoyaltyPoints() {
       setIsLoading(false);
       setPoints(0);
       setCustomerId(null);
+      setGiftCardRewards([]);
       setIsRedemptionEnabled(true);
-      setMessage("Sign in to view loyalty points.");
+      setMessage(loginMessage);
       return;
     }
 
@@ -105,19 +174,20 @@ function CustomerAccountLoyaltyPoints() {
         setCustomerId(data.customerId);
         setPoints(data.loyaltyPoints || 0);
         setIsRedemptionEnabled(data.checkoutRedemptionEnabled !== false);
-        setStoreCreditReward(
-          normalizeStoreCreditReward(
-            data.rewardOptions?.find(
-              (reward) => reward?.type === "store_credit",
-            ),
-          ) || DEFAULT_STORE_CREDIT_REWARD,
+        setGiftCardRewards(
+          (data.rewardOptions || [])
+            .map(normalizeGiftCardReward)
+            .filter(Boolean),
         );
+        // Store API text settings
+        setApiTextSettings(data);
       } catch (error) {
         console.error(error);
 
         if (isCurrent) {
           setPoints(0);
           setCustomerId(null);
+          setGiftCardRewards([]);
           setMessage(error.message || "Could not load points");
         }
       } finally {
@@ -132,22 +202,29 @@ function CustomerAccountLoyaltyPoints() {
     return () => {
       isCurrent = false;
     };
-  }, [apiBaseUrl, customer?.id]);
+  }, [apiBaseUrl, customer?.id, configErrorMsg, loginMessage]);
 
-  const redeemStoreCredit = async () => {
+  const redeemGiftCard = async (giftCardReward) => {
     if (!customerId) {
-      setMessage("Loyalty customer is not available.");
+      setMessage(errorMsg);
       return;
     }
 
     if (!isRedemptionEnabled) {
-      setMessage("Rewards redemption is currently disabled.");
+      setMessage(disabledMsg);
       return;
     }
 
-    if (!canRedeemStoreCredit) {
+    if (!giftCardReward) {
+      setMessage(errorMsg);
+      return;
+    }
+
+    if (points < giftCardReward.points) {
       setMessage(
-        `Earn ${storeCreditReward.points - points} more points to redeem store credit.`,
+        formatSettingText(notEnoughPtsMsg, {
+          remaining_points: giftCardReward.points - points,
+        }),
       );
       return;
     }
@@ -163,24 +240,26 @@ function CustomerAccountLoyaltyPoints() {
         },
         body: JSON.stringify({
           customerId,
-          pointsToRedeem: storeCreditReward.points,
-          rewardType: "store_credit",
+          pointsToRedeem: giftCardReward.points,
+          rewardType: "gift_card",
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.message || "Could not redeem store credit");
+        throw new Error(data.message || errorMsg);
       }
 
-      setPoints((prev) => prev - storeCreditReward.points);
+      setPoints((prev) => prev - giftCardReward.points);
       setMessage(
-        `$${storeCreditReward.amount} store credit added to your account.`,
+        formatSettingText(giftCardMsg, {
+          rewardCode: data.reward.rewardCode,
+        }),
       );
     } catch (error) {
       console.error(error);
-      setMessage(error.message || "Could not redeem store credit");
+      setMessage(error.message || errorMsg);
     } finally {
       setIsRedeeming(false);
     }
@@ -190,46 +269,58 @@ function CustomerAccountLoyaltyPoints() {
     <s-box border="base" padding="large" cornerRadius="large">
       <s-stack gap="base">
         <s-stack gap="none">
-          <s-heading>Loyalty balance</s-heading>
-          <s-text appearance="subdued">Available points</s-text>
+          <s-heading>{balanceTitle}</s-heading>
+          <s-text appearance="subdued">{availableLabel}</s-text>
         </s-stack>
 
         <s-box border="base" padding="large" cornerRadius="base">
           <s-stack gap="small">
-            <s-text appearance="subdued">Current balance</s-text>
-            <s-heading>{isLoading ? "Loading..." : pointsLabel}</s-heading>
+            <s-text appearance="subdued">{currentBalanceLabel}</s-text>
+            <s-heading>{isLoading ? loadingText : pointsLabel}</s-heading>
           </s-stack>
         </s-box>
 
-        <s-box border="base" padding="large" cornerRadius="base">
-          <s-stack gap="base">
-            <s-stack gap="none">
-              <s-text emphasis="bold">{storeCreditReward.title}</s-text>
-              <s-text appearance="subdued">
-                {storeCreditReward.points.toLocaleString()} points = $
-                {storeCreditReward.amount.toLocaleString()} store credit
-              </s-text>
-            </s-stack>
+        {giftCardRewards.map((giftCardReward) => {
+          const canRedeemGiftCard =
+            Boolean(customerId) && points >= giftCardReward.points;
 
-            <s-button
-              kind="primary"
-              disabled={
-                isLoading ||
-                isRedeeming ||
-                !isRedemptionEnabled ||
-                !canRedeemStoreCredit
-              }
-              onClick={redeemStoreCredit}
+          return (
+            <s-box
+              key={`${giftCardReward.points}-${giftCardReward.amount}`}
+              border="base"
+              padding="large"
+              cornerRadius="base"
             >
-              {isRedeeming ? "Redeeming..." : "Redeem store credit"}
-            </s-button>
-            {!isRedemptionEnabled ? (
-              <s-text appearance="subdued">
-                Rewards redemption is currently disabled.
-              </s-text>
-            ) : null}
-          </s-stack>
-        </s-box>
+              <s-stack gap="base">
+                <s-stack gap="none">
+                  <s-text emphasis="bold">{giftCardReward.title}</s-text>
+                  <s-text appearance="subdued">
+                    {giftCardReward.points.toLocaleString()} points = $
+                    {giftCardReward.amount.toLocaleString()} gift card
+                  </s-text>
+                </s-stack>
+
+                <s-button
+                  kind="primary"
+                  disabled={
+                    isLoading ||
+                    isRedeeming ||
+                    !isRedemptionEnabled ||
+                    !canRedeemGiftCard
+                  }
+                  onClick={() => redeemGiftCard(giftCardReward)}
+                >
+                  {isRedeeming ? redeemingText : redeemButtonText}
+                </s-button>
+                {!isRedemptionEnabled ? (
+                  <s-text appearance="subdued">
+                    {disabledMsg}
+                  </s-text>
+                ) : null}
+              </s-stack>
+            </s-box>
+          );
+        })}
 
         {message ? (
           <s-banner>

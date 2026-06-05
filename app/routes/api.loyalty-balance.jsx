@@ -3,7 +3,8 @@ import { unauthenticated } from "../shopify.server";
 import {
   DEFAULT_LOYALTY_SETTINGS,
   DEFAULT_REWARD_OPTIONS,
-  getRewardOptionsWithSpecials,
+  getRewardTypePreferenceFromSettings,
+  getRewardOptionsForPreference,
 } from "../services/loyalty-settings.server";
 import {
   getEffectiveIntegration,
@@ -23,6 +24,56 @@ const CORS_HEADERS = {
 };
 
 const checkedWebhookSubscriptions = new Set();
+
+const TEXT_SETTINGS_FIELDS = [
+  "checkoutLoginMessage",
+  "checkoutDescription",
+  "checkoutRewardPrompt",
+  "checkoutRedeemButtonText",
+  "checkoutRedeemingText",
+  "checkoutPointsLabel",
+  "checkoutSelectRewardMsg",
+  "checkoutNotEnoughPtsMsg",
+  "checkoutDisabledMsg",
+  "checkoutRedemptionTitle",
+  "checkoutGiftCardMsg",
+  "checkoutDiscountMsg",
+  "checkoutErrorMsg",
+  "checkoutLoadingMsg",
+  "checkoutAvailableRewardsMsg",
+  "accountLoginMessage",
+  "accountBalanceTitle",
+  "accountAvailableLabel",
+  "accountCurrentBalance",
+  "accountLoadingText",
+  "accountRedeemingText",
+  "accountRedeemButtonText",
+  "accountDisabledMsg",
+  "accountNotEnoughPtsMsg",
+  "accountGiftCardMsg",
+  "accountErrorMsg",
+  "accountConfigErrorMsg",
+];
+
+function getTextSettingsSelect() {
+  return TEXT_SETTINGS_FIELDS.reduce((select, field) => {
+    if (hasLoyaltySettingField(field)) {
+      select[field] = true;
+    }
+    return select;
+  }, {});
+}
+
+function buildTextSettingsResponse(loyaltySetting) {
+  const response = {};
+  TEXT_SETTINGS_FIELDS.forEach((field) => {
+    const value = loyaltySetting?.[field];
+    if (value !== undefined && value !== null) {
+      response[field] = value;
+    }
+  });
+  return response;
+}
 
 function json(data, init = {}) {
   return Response.json(data, {
@@ -110,6 +161,7 @@ async function findCustomerWithRewards(shopifyCustomerId, shopDomain) {
           preferredIntegration: true,
         }
       : {}),
+    ...getTextSettingsSelect(),
   };
 
   try {
@@ -154,6 +206,13 @@ async function getShopIntegrationStatus(shopDomain) {
       checkoutIntegrationEnabled:
         DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled,
       effectiveIntegration: DEFAULT_LOYALTY_SETTINGS.preferredIntegration,
+      rewardOptions: getRewardOptionsForPreference(
+        DEFAULT_LOYALTY_SETTINGS.redemptionRewards,
+      ),
+      rewardTypePreference: getRewardTypePreferenceFromSettings(
+        DEFAULT_LOYALTY_SETTINGS.redemptionRewards,
+      ),
+      loyaltySetting: DEFAULT_LOYALTY_SETTINGS,
     };
   }
 
@@ -166,12 +225,14 @@ async function getShopIntegrationStatus(shopDomain) {
         ...getShopPlanSelect(),
         loyaltySetting: {
           select: {
+            redemptionRewards: true,
             checkoutRedemptionEnabled: true,
             ...(hasLoyaltySettingField("preferredIntegration")
               ? {
                   preferredIntegration: true,
                 }
               : {}),
+            ...getTextSettingsSelect(),
           },
         },
       },
@@ -186,6 +247,13 @@ async function getShopIntegrationStatus(shopDomain) {
         shop?.loyaltySetting,
       ),
       effectiveIntegration: getEffectiveIntegration(shop, shop?.loyaltySetting),
+      rewardOptions: getRewardOptionsForPreference(
+        shop?.loyaltySetting?.redemptionRewards,
+      ),
+      rewardTypePreference: getRewardTypePreferenceFromSettings(
+        shop?.loyaltySetting?.redemptionRewards,
+      ),
+      loyaltySetting: shop?.loyaltySetting,
     };
   } catch (error) {
     if (!isMissingLoyaltySettingFieldError(error)) {
@@ -198,6 +266,13 @@ async function getShopIntegrationStatus(shopDomain) {
       checkoutIntegrationEnabled:
         DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled,
       effectiveIntegration: DEFAULT_LOYALTY_SETTINGS.preferredIntegration,
+      rewardOptions: getRewardOptionsForPreference(
+        DEFAULT_LOYALTY_SETTINGS.redemptionRewards,
+      ),
+      rewardTypePreference: getRewardTypePreferenceFromSettings(
+        DEFAULT_LOYALTY_SETTINGS.redemptionRewards,
+      ),
+      loyaltySetting: DEFAULT_LOYALTY_SETTINGS,
     };
   }
 }
@@ -220,17 +295,20 @@ async function getLoyaltyBalance(customerId, shop) {
 
   if (!customer) {
     const integrationStatus = await getShopIntegrationStatus(shopDomain);
+    const textSettings = buildTextSettingsResponse(
+      integrationStatus.loyaltySetting,
+    );
 
     return json({
       success: true,
       customerId: null,
       loyaltyPoints: 0,
-      rewardOptions: getRewardOptionsWithSpecials(),
       ...integrationStatus,
+      ...textSettings,
     });
   }
   const rewardOptions =
-    getRewardOptionsWithSpecials(
+    getRewardOptionsForPreference(
       customer.shop?.loyaltySetting?.redemptionRewards,
     ) || DEFAULT_REWARD_OPTIONS;
   const checkoutRedemptionEnabled = isCheckoutRedemptionAvailable(
@@ -244,6 +322,9 @@ async function getLoyaltyBalance(customerId, shop) {
     customer.shop,
     customer.shop?.loyaltySetting,
   );
+  const textSettings = buildTextSettingsResponse(
+    customer.shop?.loyaltySetting,
+  );
 
   return json({
     success: true,
@@ -253,6 +334,10 @@ async function getLoyaltyBalance(customerId, shop) {
     checkoutRedemptionEnabled: rewardsRedemptionEnabled,
     checkoutIntegrationEnabled: checkoutRedemptionEnabled,
     effectiveIntegration,
+    rewardTypePreference: getRewardTypePreferenceFromSettings(
+      customer.shop?.loyaltySetting?.redemptionRewards,
+    ),
+    ...textSettings,
   });
 }
 

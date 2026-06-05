@@ -29,3 +29,75 @@ key = "api_base_url"
 type = "single_line_text_field"
 name = "API base URL"
 description = "HTTPS URL of the app backend, for example the Shopify CLI tunnel URL."
+
+[[extensions.settings.fields]]
+key = "accountLoginMessage"
+type = "single_line_text_field"
+name = "Login message"
+description = "Message shown when customer is not logged in."
+
+[[extensions.settings.fields]]
+key = "accountBalanceTitle"
+type = "single_line_text_field"
+name = "Balance section title"
+description = "Title for the loyalty balance section."
+
+[[extensions.settings.fields]]
+key = "accountAvailableLabel"
+type = "single_line_text_field"
+name = "Available points label"
+description = "Label for available points display."
+
+[[extensions.settings.fields]]
+key = "accountCurrentBalance"
+type = "single_line_text_field"
+name = "Current balance label"
+description = "Label for current balance display."
+
+[[extensions.settings.fields]]
+key = "accountLoadingText"
+type = "single_line_text_field"
+name = "Loading state text"
+description = "Text shown while loading."
+
+[[extensions.settings.fields]]
+key = "accountRedeemingText"
+type = "single_line_text_field"
+name = "Redeeming state text"
+description = "Text shown while redeeming is in progress."
+
+[[extensions.settings.fields]]
+key = "accountRedeemButtonText"
+type = "single_line_text_field"
+name = "Redeem button text"
+description = "Text for the redeem button."
+
+[[extensions.settings.fields]]
+key = "accountDisabledMsg"
+type = "single_line_text_field"
+name = "Redemption disabled message"
+description = "Message when rewards redemption is disabled."
+
+[[extensions.settings.fields]]
+key = "accountNotEnoughPtsMsg"
+type = "single_line_text_field"
+name = "Not enough points message"
+description = "Message when customer doesn't have enough points. Use {remaining_points} placeholder."
+
+[[extensions.settings.fields]]
+key = "accountGiftCardMsg"
+type = "single_line_text_field"
+name = "Gift card success message"
+description = "Success message for gift card redemption. Use {rewardCode} placeholder."
+
+[[extensions.settings.fields]]
+key = "accountErrorMsg"
+type = "single_line_text_field"
+name = "Redemption error message"
+description = "Generic error message when redemption fails."
+
+[[extensions.settings.fields]]
+key = "accountConfigErrorMsg"
+type = "single_line_text_field"
+name = "Configuration error message"
+description = "Message when API URL is not configured."

@@ -16,7 +16,7 @@ export const DEFAULT_REWARD_OPTIONS = [
   },
 ];
 
-export const SPECIAL_REWARD_OPTIONS = [
+export const DEFAULT_GIFT_CARD_REWARD_OPTIONS = [
   {
     type: "gift_card",
     points: 1500,
@@ -24,6 +24,9 @@ export const SPECIAL_REWARD_OPTIONS = [
     title: "$15 Gift Card",
     description: "Redeem 1,500 points to get for free",
   },
+];
+
+export const SPECIAL_REWARD_OPTIONS = [
   {
     type: "store_credit",
     points: 100,
@@ -42,34 +45,126 @@ export const DEFAULT_LOYALTY_SETTINGS = {
   checkoutRedemptionEnabled: true,
   preferredIntegration: "theme",
   redemptionRewards: JSON.stringify(DEFAULT_REWARD_OPTIONS),
+  // Checkout UI Text Settings
+  checkoutLoginMessage: "Sign in to use loyalty points.",
+  checkoutDescription: "You have {coupon_amount} available {reward_label}",
+  checkoutRewardPrompt: "Choose a {reward_singular}",
+  checkoutRedeemButtonText: "Redeem",
+  checkoutRedeemingText: "Redeeming...",
+  checkoutPointsLabel: "Available points",
+  checkoutSelectRewardMsg: "Please select a reward.",
+  checkoutNotEnoughPtsMsg: "Not enough points for this reward.",
+  checkoutDisabledMsg: "Rewards redemption is disabled in checkout.",
+  checkoutRedemptionTitle: "Redeem your Points",
+  checkoutGiftCardMsg: "Gift card created: {rewardCode}",
+  checkoutDiscountMsg:
+    "Discount code created: {rewardCode}. Points will be deducted after payment.",
+  checkoutErrorMsg: "Could not redeem points",
+  checkoutLoadingMsg: "Available points loading...",
+  checkoutAvailableRewardsMsg: "{reward_count} available {reward_label}",
+  // Customer Account UI Text Settings
+  accountLoginMessage: "Sign in to view loyalty points.",
+  accountBalanceTitle: "Loyalty balance",
+  accountAvailableLabel: "Available points",
+  accountCurrentBalance: "Current balance",
+  accountLoadingText: "Loading...",
+  accountRedeemingText: "Redeeming...",
+  accountRedeemButtonText: "Redeem gift card",
+  accountDisabledMsg: "Rewards redemption is currently disabled.",
+  accountNotEnoughPtsMsg: "Earn {remaining_points} more points to redeem a gift card.",
+  accountGiftCardMsg: "Gift card created: {rewardCode}",
+  accountErrorMsg: "Could not redeem gift card",
+  accountConfigErrorMsg: "Loyalty API URL is not configured.",
 };
 
-export function normalizeRewardOptions(value) {
+export const REWARD_TYPE_PREFERENCES = ["gift_card", "discount", "both"];
+
+export function normalizeRewardTypePreference(value) {
+  return REWARD_TYPE_PREFERENCES.includes(value) ? value : "both";
+}
+
+export function parseRewardSettings(value) {
   let parsed = value;
 
   if (typeof value === "string") {
     try {
       parsed = JSON.parse(value);
     } catch {
-      return null;
+      return {
+        rewardTypePreference: "both",
+        rewards: null,
+      };
     }
   }
 
-  if (!Array.isArray(parsed)) {
+  if (Array.isArray(parsed)) {
+    return {
+      rewardTypePreference: "both",
+      rewards: parsed,
+    };
+  }
+
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.rewards)) {
+    return {
+      rewardTypePreference: normalizeRewardTypePreference(
+        parsed.rewardTypePreference,
+      ),
+      rewards: parsed.rewards,
+    };
+  }
+
+  return {
+    rewardTypePreference: "both",
+    rewards: null,
+  };
+}
+
+export function serializeRewardSettings(rewards, rewardTypePreference) {
+  return JSON.stringify({
+    rewardTypePreference: normalizeRewardTypePreference(rewardTypePreference),
+    rewards,
+  });
+}
+
+export function getRewardTypePreferenceFromSettings(value) {
+  return parseRewardSettings(value).rewardTypePreference;
+}
+
+export function normalizeRewardOptions(value) {
+  const parsedSettings = parseRewardSettings(value);
+
+  if (!Array.isArray(parsedSettings.rewards)) {
     return null;
   }
 
-  const rewards = parsed
+  const rewards = parsedSettings.rewards
     .map((reward) => {
       const points = Number(reward?.points);
+      const type = reward?.type || "discount";
       const discount = Number(reward?.discount);
+      const amount = Number(reward?.amount);
 
-      if (
-        !Number.isInteger(points) ||
-        points < 1 ||
-        !Number.isFinite(discount) ||
-        discount <= 0
-      ) {
+      if (!Number.isInteger(points) || points < 1) {
+        return null;
+      }
+
+      if (type === "gift_card") {
+        if (!Number.isFinite(amount) || amount <= 0) {
+          return null;
+        }
+
+        return {
+          type: "gift_card",
+          points,
+          amount,
+          title: reward?.title || `$${amount} Gift Card`,
+          description:
+            reward?.description ||
+            `Redeem ${points.toLocaleString("en")} points for a $${amount} gift card`,
+        };
+      }
+
+      if (!Number.isFinite(discount) || discount <= 0) {
         return null;
       }
 
@@ -89,9 +184,44 @@ export function normalizeRewardOptions(value) {
 }
 
 export function getRewardOptionsWithSpecials(value) {
-  const discountRewards = normalizeRewardOptions(value) || DEFAULT_REWARD_OPTIONS;
+  const configuredRewards = normalizeRewardOptions(value) || [];
+  const discountRewards = configuredRewards.filter(
+    (reward) => (reward.type || "discount") === "discount",
+  );
+  const giftCardRewards = configuredRewards.filter(
+    (reward) => reward.type === "gift_card",
+  );
+  const rewards = [
+    ...(discountRewards.length > 0 ? discountRewards : DEFAULT_REWARD_OPTIONS),
+    ...(giftCardRewards.length > 0
+      ? giftCardRewards
+      : DEFAULT_GIFT_CARD_REWARD_OPTIONS),
+    ...SPECIAL_REWARD_OPTIONS,
+  ];
 
-  return [...discountRewards, ...SPECIAL_REWARD_OPTIONS].sort(
-    (a, b) => a.points - b.points,
+  return rewards.sort((a, b) => a.points - b.points);
+}
+
+export function filterRewardOptionsByPreference(rewards, preference) {
+  const normalizedPreference = normalizeRewardTypePreference(preference);
+
+  if (normalizedPreference === "both") {
+    return rewards.filter((reward) =>
+      ["discount", "gift_card"].includes(reward.type || "discount"),
+    );
+  }
+
+  return rewards.filter(
+    (reward) => (reward.type || "discount") === normalizedPreference,
+  );
+}
+
+export function getRewardOptionsForPreference(value, preference) {
+  const effectivePreference =
+    preference ?? getRewardTypePreferenceFromSettings(value);
+
+  return filterRewardOptionsByPreference(
+    getRewardOptionsWithSpecials(value),
+    effectivePreference,
   );
 }

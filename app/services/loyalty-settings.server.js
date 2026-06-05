@@ -5,8 +5,14 @@ export {
   DEFAULT_LOYALTY_SETTINGS,
   DEFAULT_REWARD_OPTIONS,
   SPECIAL_REWARD_OPTIONS,
+  filterRewardOptionsByPreference,
+  getRewardTypePreferenceFromSettings,
+  getRewardOptionsForPreference,
   getRewardOptionsWithSpecials,
   normalizeRewardOptions,
+  normalizeRewardTypePreference,
+  parseRewardSettings,
+  serializeRewardSettings,
 } from "./loyalty-settings.shared";
 
 export function hasLoyaltySettingField(fieldName) {

@@ -25,18 +25,12 @@ const DEFAULT_REWARD_OPTIONS = [
     title: "$15 Gift Card",
     description: "Redeem 1,500 points to get for free",
   },
-  {
-    type: "store_credit",
-    points: 100,
-    amount: 1,
-    title: "Store Credit Reward",
-    description: "Redeem 100 points to get $1 store credits",
-  },
 ];
 
 const DEFAULT_LOGIN_MESSAGE = "Sign in to use loyalty points.";
-const DEFAULT_DESCRIPTION = "You have {coupon_amount} available discounts";
-const DEFAULT_DISCOUNT_PROMPT = "Choose a discount";
+const DEFAULT_DESCRIPTION = "You have {coupon_amount} available {reward_label}";
+const DEFAULT_REWARD_PROMPT = "Choose a {reward_singular}";
+const REWARD_TYPE_PREFERENCES = ["gift_card", "discount", "both"];
 
 function getSettingValue(settings, key, fallback) {
   const value = settings?.[key];
@@ -50,6 +44,42 @@ function formatSettingText(value, replacements) {
       .replaceAll(`{${key}}`, String(replacement))
       .replaceAll(`{{${key}}}`, String(replacement));
   }, value);
+}
+
+function normalizeRewardTypePreference(value) {
+  return REWARD_TYPE_PREFERENCES.includes(value) ? value : "both";
+}
+
+function getRewardLanguage(rewards) {
+  const types = new Set(rewards.map((reward) => reward.type || "discount"));
+
+  if (types.size === 1 && types.has("gift_card")) {
+    return {
+      singular: "gift card",
+      plural: "gift cards",
+      badge: "Gift",
+    };
+  }
+
+  if (types.size === 1 && types.has("discount")) {
+    return {
+      singular: "discount",
+      plural: "discounts",
+      badge: "Deal",
+    };
+  }
+
+  return {
+    singular: "reward",
+    plural: "rewards",
+    badge: "Reward",
+  };
+}
+
+function replaceRewardWords(text, rewardLanguage) {
+  return text
+    .replace(/\bdiscounts\b/gi, rewardLanguage.plural)
+    .replace(/\bdiscount\b/gi, rewardLanguage.singular);
 }
 
 function formatRewardLabel(reward) {
@@ -92,7 +122,7 @@ function normalizeRewardOptions(value) {
         return null;
       }
 
-      if (type === "gift_card" || type === "store_credit") {
+      if (type === "gift_card") {
         if (!Number.isFinite(amount) || amount <= 0) {
           return null;
         }
@@ -132,22 +162,7 @@ function Extension() {
 
   const apiBaseUrl =
     settings?.api_base_url ||
-    "https://franklin-tasks-travis-postposted.trycloudflare.com";
-  const loginMessage = getSettingValue(
-    settings,
-    "login_message",
-    DEFAULT_LOGIN_MESSAGE,
-  );
-  const descriptionTemplate = getSettingValue(
-    settings,
-    "description",
-    DEFAULT_DESCRIPTION,
-  );
-  const discountPrompt = getSettingValue(
-    settings,
-    "discount_prompt",
-    DEFAULT_DISCOUNT_PROMPT,
-  );
+    "https://singh-prospects-introducing-thus.trycloudflare.com";
 
   const [checkoutCustomer, setCheckoutCustomer] = useState(
     shopify.buyerIdentity.customer.current,
@@ -157,6 +172,7 @@ function Extension() {
 
   const [points, setPoints] = useState(0);
   const [rewardOptions, setRewardOptions] = useState(DEFAULT_REWARD_OPTIONS);
+  const [rewardTypePreference, setRewardTypePreference] = useState("both");
 
   const [selectedReward, setSelectedReward] = useState("");
   const [isRedeemOpen, setIsRedeemOpen] = useState(Boolean(checkoutCustomer));
@@ -168,6 +184,77 @@ function Extension() {
   const [isRedeeming, setIsRedeeming] = useState(false);
 
   const [message, setMessage] = useState("");
+
+  // Text settings from API
+  const [apiTextSettings, setApiTextSettings] = useState({});
+
+  // Helper to get text settings - first from API, then from shopify.settings, then default
+  const getTextSetting = (key, fallback) => {
+    return apiTextSettings[key] !== undefined
+      ? apiTextSettings[key]
+      : getSettingValue(settings, key, fallback);
+  };
+
+  const loginMessage = getTextSetting(
+    "checkoutLoginMessage",
+    "Sign in to use loyalty points.",
+  );
+  const descriptionTemplate = getTextSetting(
+    "checkoutDescription",
+    "You have {coupon_amount} available {reward_label}",
+  );
+  const discountPrompt = getTextSetting(
+    "checkoutRewardPrompt",
+    "Choose a {reward_singular}",
+  );
+  const redeemButtonText = getTextSetting(
+    "checkoutRedeemButtonText",
+    "Redeem",
+  );
+  const redeemingText = getTextSetting(
+    "checkoutRedeemingText",
+    "Redeeming...",
+  );
+  const pointsLabel = getTextSetting(
+    "checkoutPointsLabel",
+    "Available points",
+  );
+  const selectRewardMsg = getTextSetting(
+    "checkoutSelectRewardMsg",
+    "Please select a reward.",
+  );
+  const notEnoughPtsMsg = getTextSetting(
+    "checkoutNotEnoughPtsMsg",
+    "Not enough points for this reward.",
+  );
+  const disabledMsg = getTextSetting(
+    "checkoutDisabledMsg",
+    "Rewards redemption is disabled in checkout.",
+  );
+  const redemptionTitle = getTextSetting(
+    "checkoutRedemptionTitle",
+    "Redeem your Points",
+  );
+  const giftCardMsg = getTextSetting(
+    "checkoutGiftCardMsg",
+    "Gift card created: {rewardCode}",
+  );
+  const discountMsg = getTextSetting(
+    "checkoutDiscountMsg",
+    "Discount code created: {rewardCode}. Points will be deducted after payment.",
+  );
+  const errorMsg = getTextSetting(
+    "checkoutErrorMsg",
+    "Could not redeem points",
+  );
+  const loadingMsg = getTextSetting(
+    "checkoutLoadingMsg",
+    "Available points loading...",
+  );
+  const availableRewardsMsg = getTextSetting(
+    "checkoutAvailableRewardsMsg",
+    "{reward_count} available {reward_label}",
+  );
 
   useEffect(() => {
     return shopify.buyerIdentity.customer.subscribe(setCheckoutCustomer);
@@ -183,6 +270,7 @@ function Extension() {
       setCustomerId(null);
       setPoints(0);
       setSelectedReward("");
+      setRewardTypePreference("both");
       setIsRedeemOpen(false);
       setIsCheckoutRedemptionEnabled(true);
       setMessage("Loyalty API URL is not configured.");
@@ -194,6 +282,7 @@ function Extension() {
       setCustomerId(null);
       setPoints(0);
       setSelectedReward("");
+      setRewardTypePreference("both");
       setIsRedeemOpen(false);
       setIsCheckoutRedemptionEnabled(true);
       setMessage(loginMessage);
@@ -226,11 +315,16 @@ function Extension() {
 
         setCustomerId(data.customerId);
         setPoints(data.loyaltyPoints);
+        setRewardTypePreference(
+          normalizeRewardTypePreference(data.rewardTypePreference),
+        );
         setRewardOptions(normalizeRewardOptions(data.rewardOptions));
         setIsCheckoutRedemptionEnabled(
           data.checkoutRedemptionEnabled !== false,
         );
         setIsRedeemOpen(data.checkoutRedemptionEnabled !== false);
+        // Store API text settings
+        setApiTextSettings(data);
       } catch (error) {
         console.error("error on api call", error);
 
@@ -263,7 +357,7 @@ function Extension() {
 
   const applyPoints = async (rewardToApply) => {
     if (!isCheckoutRedemptionEnabled) {
-      setMessage("Rewards redemption is disabled in checkout.");
+      setMessage(disabledMsg);
       return;
     }
 
@@ -272,12 +366,12 @@ function Extension() {
       rewardOptions.find((item) => getRewardValue(item) === selectedReward);
 
     if (!reward) {
-      setMessage("Please select a reward.");
+      setMessage(selectRewardMsg);
       return;
     }
 
     if (points < reward.points) {
-      setMessage("Not enough points for this reward.");
+      setMessage(notEnoughPtsMsg);
       return;
     }
 
@@ -300,35 +394,57 @@ function Extension() {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.message || "Could not redeem points");
+        throw new Error(data.message || errorMsg);
       }
 
-      if (data.reward.rewardType === "store_credit") {
-        setMessage("Store credit added. Apply store credit in Payment.");
-      } else if (data.reward.rewardType === "gift_card") {
-        setMessage(`Gift card created: ${data.reward.rewardCode}`);
+      if (data.reward.rewardType === "gift_card") {
+        setMessage(
+          formatSettingText(giftCardMsg, {
+            rewardCode: data.reward.rewardCode,
+          }),
+        );
       } else {
         setMessage(
-          `Discount code created: ${data.reward.rewardCode}. Points will be deducted after payment.`,
+          formatSettingText(discountMsg, {
+            rewardCode: data.reward.rewardCode,
+          }),
         );
       }
     } catch (error) {
       console.error(error);
-      setMessage(error.message || "Could not redeem points");
+      setMessage(error.message || errorMsg);
     } finally {
       setIsRedeeming(false);
     }
   };
 
-  const checkoutRewardOptions = rewardOptions.filter(
-    (reward) => reward.type !== "store_credit",
-  );
-  const availableRewards = rewardOptions.filter(
-    (reward) => reward.type !== "store_credit" && points >= reward.points,
-  );
-  const description = formatSettingText(descriptionTemplate, {
-    coupon_amount: availableRewards.length,
+  const checkoutRewardOptions = rewardOptions.filter((reward) => {
+    const type = reward.type || "discount";
+
+    return rewardTypePreference === "both" || type === rewardTypePreference;
   });
+  const availableRewards = checkoutRewardOptions.filter(
+    (reward) => points >= reward.points,
+  );
+  const rewardLanguage = getRewardLanguage(checkoutRewardOptions);
+  const textReplacements = {
+    coupon_amount: availableRewards.length,
+    reward_count: availableRewards.length,
+    reward_label:
+      availableRewards.length === 1
+        ? rewardLanguage.singular
+        : rewardLanguage.plural,
+    reward_singular: rewardLanguage.singular,
+    reward_plural: rewardLanguage.plural,
+  };
+  const description = replaceRewardWords(
+    formatSettingText(descriptionTemplate, textReplacements),
+    rewardLanguage,
+  );
+  const rewardPrompt = replaceRewardWords(
+    formatSettingText(discountPrompt, textReplacements),
+    rewardLanguage,
+  );
 
   if (!isCheckoutRedemptionEnabled) {
     return null;
@@ -339,16 +455,16 @@ function Extension() {
       <s-stack gap="large">
         {isRedeemOpen ? (
           <s-stack gap="base">
-            <s-text emphasis="bold">Redeem your Points</s-text>
+            <s-text emphasis="bold">{redemptionTitle}</s-text>
 
             <s-text>
               {isLoading
-                ? "Available points loading..."
-                : `Available points ${points}`}
+                ? loadingMsg
+                : `${pointsLabel} ${points}`}
             </s-text>
 
             <s-text appearance="subdued">{description}</s-text>
-            <s-text emphasis="bold">{discountPrompt}</s-text>
+            <s-text emphasis="bold">{rewardPrompt}</s-text>
 
             <s-stack gap="small">
               {checkoutRewardOptions.map((reward) => {
@@ -369,9 +485,7 @@ function Extension() {
                       <s-text emphasis="bold">
                         {reward.type === "gift_card"
                           ? "Gift"
-                          : reward.type === "store_credit"
-                            ? "Credit"
-                            : "Deal"}
+                          : rewardLanguage.badge}
                       </s-text>
 
                       <s-stack gap="none">
@@ -390,7 +504,7 @@ function Extension() {
                           applyPoints(reward);
                         }}
                       >
-                        Redeem
+                        {isRedeeming ? redeemingText : redeemButtonText}
                       </s-button>
                     </s-grid>
                   </s-box>
@@ -399,8 +513,16 @@ function Extension() {
             </s-stack>
 
             <s-text appearance="subdued">
-              {availableRewards.length} available reward
-              {availableRewards.length === 1 ? "" : "s"}
+              {replaceRewardWords(
+                formatSettingText(availableRewardsMsg, {
+                  reward_count: availableRewards.length,
+                  reward_label:
+                    availableRewards.length === 1
+                      ? rewardLanguage.singular
+                      : rewardLanguage.plural,
+                }),
+                rewardLanguage,
+              )}
             </s-text>
           </s-stack>
         ) : null}
