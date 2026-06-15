@@ -12,6 +12,7 @@
   style="--loyalty-accent-color: {{ accent_color }};"
   data-loyalty-points-widget
   data-api-base-url="{{ block.settings.api_base_url | escape }}"
+  data-balance-url="/apps/loyalty-points"
   data-shop-domain="{{ shop.permanent_domain | escape }}"
   data-customer-id="{{ customer_id }}"
   data-logged-in="{% if customer %}true{% else %}false{% endif %}"

@@ -42,6 +42,11 @@ scopes = "read_customers,read_gift_cards,read_orders,read_store_credit_account_t
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]
 
+[app_proxy]
+url = "/api/loyalty-balance"
+subpath = "loyalty-points"
+prefix = "apps"
+
 [product.metafields.app.demo_info]
 type = "single_line_text_field"
 name = "Demo Source Info"
