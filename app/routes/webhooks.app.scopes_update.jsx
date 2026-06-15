@@ -1,21 +1,37 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import {
+  webhookAuthenticationError,
+  webhookProcessingError,
+} from "../services/errors.server";
 
 export const action = async ({ request }) => {
-  const { payload, session } = await authenticate.webhook(request);
+  let webhook;
 
-  const current = payload.current;
-
-  if (session) {
-    await db.session.update({
-      where: {
-        id: session.id,
-      },
-      data: {
-        scope: current.toString(),
-      },
-    });
+  try {
+    webhook = await authenticate.webhook(request);
+  } catch (error) {
+    return webhookAuthenticationError("app/scopes-update", error);
   }
 
-  return new Response();
+  const { payload, session } = webhook;
+
+  try {
+    if (session && payload?.current) {
+      await db.session.update({
+        where: {
+          id: session.id,
+        },
+        data: {
+          scope: payload.current.toString(),
+        },
+      });
+    }
+
+    return new Response();
+  } catch (error) {
+    return webhookProcessingError("app/scopes-update", error, {
+      shop: session?.shop,
+    });
+  }
 };

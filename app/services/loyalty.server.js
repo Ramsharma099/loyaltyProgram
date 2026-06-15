@@ -2,11 +2,10 @@ import prisma from "../db.server";
 import { getLoyaltySettings } from "./loyalty-settings.server";
 
 export async function addSignupBonus(shopDomain, customerData) {
-  try {
-    const { shop, settings } = await getLoyaltySettings(shopDomain);
+  const { shop, settings } = await getLoyaltySettings(shopDomain);
 
-    // check customer exists
-    let customer = await prisma.customer.findFirst({
+  return prisma.$transaction(async (tx) => {
+    let customer = await tx.customer.findFirst({
       where: {
         shopId: shop.id,
         shopifyCustomerId: String(customerData.id),
@@ -17,8 +16,7 @@ export async function addSignupBonus(shopDomain, customerData) {
       return customer;
     }
 
-    // create customer
-    customer = await prisma.customer.create({
+    customer = await tx.customer.create({
       data: {
         shopId: shop.id,
         shopifyCustomerId: String(customerData.id),
@@ -28,8 +26,7 @@ export async function addSignupBonus(shopDomain, customerData) {
       },
     });
 
-    // create transaction
-    await prisma.pointTransaction.create({
+    await tx.pointTransaction.create({
       data: {
         customerId: customer.id,
         points: settings.signupBonusPoints,
@@ -39,7 +36,5 @@ export async function addSignupBonus(shopDomain, customerData) {
     });
 
     return customer;
-  } catch (error) {
-    console.error(error);
-  }
+  });
 }

@@ -27,6 +27,7 @@ import {
   getEffectiveIntegration,
   syncShopPlan,
 } from "../services/shop-plan.server";
+import { logError } from "../services/errors.server";
 
 const SETTING_FIELDS = [
   {
@@ -143,36 +144,6 @@ const REWARD_FIELD_CONFIG = {
     rewardType: "gift_card",
     valueLabel: "gift card",
   },
-};
-
-const TEXT_FIELD_DESCRIPTIONS = {
-  checkoutLoginMessage: "Message displayed to guests prompting them to log in to access loyalty rewards in checkout.",
-  checkoutRedemptionTitle: "Title of the rewards redemption section in the checkout extension.",
-  checkoutDescription: "Description of available rewards. Use {coupon_amount} for reward count and {reward_label} for reward type.",
-  checkoutRewardPrompt: "Prompt asking customers to select a reward to redeem. Use {reward_singular} for singular reward type.",
-  checkoutPointsLabel: "Label displayed next to the customer's current points balance.",
-  checkoutRedeemButtonText: "Text displayed on the button customers click to redeem a selected reward.",
-  checkoutRedeemingText: "Status message shown while a reward redemption is processing.",
-  checkoutLoadingMsg: "Loading message displayed while fetching customer reward data.",
-  checkoutSelectRewardMsg: "Prompt encouraging customers to select a reward option.",
-  checkoutNotEnoughPtsMsg: "Error message shown when customer doesn't have enough points for the selected reward.",
-  checkoutDisabledMsg: "Message displayed when reward redemption is disabled for the store.",
-  checkoutGiftCardMsg: "Success message after gift card redemption. Use {rewardCode} for the generated code.",
-  checkoutDiscountMsg: "Success message after discount redemption. Use {rewardCode} for the discount code.",
-  checkoutErrorMsg: "Generic error message shown when something goes wrong during redemption.",
-  checkoutAvailableRewardsMsg: "Message showing available rewards. Use {reward_count} and {reward_label} as placeholders.",
-  accountLoginMessage: "Message displayed to guests prompting them to log in to view their loyalty balance.",
-  accountBalanceTitle: "Title of the loyalty points balance section in customer account.",
-  accountAvailableLabel: "Label for the customer's current available points balance.",
-  accountCurrentBalance: "Label for the customer's total lifetime points earned.",
-  accountLoadingText: "Status message shown while loading customer loyalty data.",
-  accountRedeemingText: "Status message shown while a reward redemption is processing.",
-  accountRedeemButtonText: "Text displayed on the button customers click to redeem a reward.",
-  accountDisabledMsg: "Message displayed when reward redemption is disabled for the store.",
-  accountNotEnoughPtsMsg: "Error message shown when customer doesn't have enough points. Use {remaining_points} for points needed.",
-  accountGiftCardMsg: "Success message after gift card redemption. Use {rewardCode} for the generated code.",
-  accountErrorMsg: "Generic error message shown when something goes wrong during redemption.",
-  accountConfigErrorMsg: "Error message shown when the loyalty program isn't properly configured.",
 };
 
 function getEditableRewardRows(value, rewardType) {
@@ -632,14 +603,41 @@ export const action = async ({ request }) => {
     );
   }
 
-  const { shop } = await getLoyaltySettings(session.shop);
+  let settings;
 
-  const settings = await prisma.loyaltySetting.update({
-    where: {
-      shopId: shop.id,
-    },
-    data: filterLoyaltySettingData(values),
-  });
+  try {
+    const { shop } = await getLoyaltySettings(session.shop);
+
+    settings = await prisma.loyaltySetting.update({
+      where: {
+        shopId: shop.id,
+      },
+      data: filterLoyaltySettingData(values),
+    });
+  } catch (error) {
+    logError("settings:save", error, { shop: session.shop });
+
+    return Response.json(
+      {
+        errors: {
+          form: "Could not save settings. Please try again.",
+        },
+        values: {
+          ...values,
+          discountRewardRows,
+          giftCardRewardRows,
+        },
+        shopPlan: {
+          name: planShop.shopifyPlanName || "Unknown",
+          isShopifyPlus: Boolean(planShop.isShopifyPlus),
+          isPartnerDevelopment: Boolean(planShop.isPartnerDevelopment),
+          checkoutAvailable,
+          effectiveIntegration: getEffectiveIntegration(planShop, values),
+        },
+      },
+      { status: 500 },
+    );
+  }
 
   return Response.json({
     settings,
@@ -756,6 +754,7 @@ export default function LoyaltySettingsPage() {
       {actionData?.saved ? (
         <s-banner tone="success">Settings saved successfully.</s-banner>
       ) : null}
+      {errors.form ? <s-banner tone="critical">{errors.form}</s-banner> : null}
 
       <section className="settings-hero" aria-label="Settings summary">
         <div>
@@ -939,358 +938,6 @@ export default function LoyaltySettingsPage() {
                   </s-stack>
                 </section>
 
-                <section className="rule-section">
-                  <s-stack gap="base">
-                    <div className="rule-section-header">
-                      <div>
-                        <h3>Checkout UI text</h3>
-                        <p>Customize text strings shown in checkout redemption.</p>
-                      </div>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Login message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutLoginMessage} />
-                      </div>
-                      <s-text-field
-                        name="checkoutLoginMessage"
-                        value={getSettingValue(values, "checkoutLoginMessage")}
-                        error={errors.checkoutLoginMessage || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Redemption section title</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutRedemptionTitle} />
-                      </div>
-                      <s-text-field
-                        name="checkoutRedemptionTitle"
-                        value={getSettingValue(values, "checkoutRedemptionTitle")}
-                        error={errors.checkoutRedemptionTitle || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Description template</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutDescription} />
-                      </div>
-                      <s-text-field
-                        name="checkoutDescription"
-                        value={getSettingValue(values, "checkoutDescription")}
-                        details="Use {coupon_amount} and {reward_label} as placeholders"
-                        error={errors.checkoutDescription || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Reward selection prompt</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutRewardPrompt} />
-                      </div>
-                      <s-text-field
-                        name="checkoutRewardPrompt"
-                        value={getSettingValue(values, "checkoutRewardPrompt")}
-                        details="Use {reward_singular} as placeholder"
-                        error={errors.checkoutRewardPrompt || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Points label</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutPointsLabel} />
-                      </div>
-                      <s-text-field
-                        name="checkoutPointsLabel"
-                        value={getSettingValue(values, "checkoutPointsLabel")}
-                        error={errors.checkoutPointsLabel || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Redeem button text</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutRedeemButtonText} />
-                      </div>
-                      <s-text-field
-                        name="checkoutRedeemButtonText"
-                        value={getSettingValue(values, "checkoutRedeemButtonText")}
-                        error={errors.checkoutRedeemButtonText || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Redeeming state text</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutRedeemingText} />
-                      </div>
-                      <s-text-field
-                        name="checkoutRedeemingText"
-                        value={getSettingValue(values, "checkoutRedeemingText")}
-                        error={errors.checkoutRedeemingText || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Loading message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutLoadingMsg} />
-                      </div>
-                      <s-text-field
-                        name="checkoutLoadingMsg"
-                        value={getSettingValue(values, "checkoutLoadingMsg")}
-                        error={errors.checkoutLoadingMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Select reward message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutSelectRewardMsg} />
-                      </div>
-                      <s-text-field
-                        name="checkoutSelectRewardMsg"
-                        value={getSettingValue(values, "checkoutSelectRewardMsg")}
-                        error={errors.checkoutSelectRewardMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Not enough points message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutNotEnoughPtsMsg} />
-                      </div>
-                      <s-text-field
-                        name="checkoutNotEnoughPtsMsg"
-                        value={getSettingValue(values, "checkoutNotEnoughPtsMsg")}
-                        error={errors.checkoutNotEnoughPtsMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Redemption disabled message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutDisabledMsg} />
-                      </div>
-                      <s-text-field
-                        name="checkoutDisabledMsg"
-                        value={getSettingValue(values, "checkoutDisabledMsg")}
-                        error={errors.checkoutDisabledMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Gift card success message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutGiftCardMsg} />
-                      </div>
-                      <s-text-field
-                        name="checkoutGiftCardMsg"
-                        value={getSettingValue(values, "checkoutGiftCardMsg")}
-                        details="Use {rewardCode} as placeholder"
-                        error={errors.checkoutGiftCardMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Discount success message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutDiscountMsg} />
-                      </div>
-                      <s-text-field
-                        name="checkoutDiscountMsg"
-                        value={getSettingValue(values, "checkoutDiscountMsg")}
-                        details="Use {rewardCode} as placeholder"
-                        error={errors.checkoutDiscountMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Error message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutErrorMsg} />
-                      </div>
-                      <s-text-field
-                        name="checkoutErrorMsg"
-                        value={getSettingValue(values, "checkoutErrorMsg")}
-                        error={errors.checkoutErrorMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Available rewards message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.checkoutAvailableRewardsMsg} />
-                      </div>
-                      <s-text-field
-                        name="checkoutAvailableRewardsMsg"
-                        value={getSettingValue(values, "checkoutAvailableRewardsMsg")}
-                        details="Use {reward_count} and {reward_label} as placeholders"
-                        error={errors.checkoutAvailableRewardsMsg || undefined}
-                      ></s-text-field>
-                    </div>
-                  </s-stack>
-                </section>
-
-                <section className="rule-section">
-                  <s-stack gap="base">
-                    <div className="rule-section-header">
-                      <div>
-                        <h3>Customer account UI text</h3>
-                        <p>Customize text strings shown in customer account.</p>
-                      </div>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Login message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountLoginMessage} />
-                      </div>
-                      <s-text-field
-                        name="accountLoginMessage"
-                        value={getSettingValue(values, "accountLoginMessage")}
-                        error={errors.accountLoginMessage || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Balance section title</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountBalanceTitle} />
-                      </div>
-                      <s-text-field
-                        name="accountBalanceTitle"
-                        value={getSettingValue(values, "accountBalanceTitle")}
-                        error={errors.accountBalanceTitle || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Available points label</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountAvailableLabel} />
-                      </div>
-                      <s-text-field
-                        name="accountAvailableLabel"
-                        value={getSettingValue(values, "accountAvailableLabel")}
-                        error={errors.accountAvailableLabel || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Current balance label</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountCurrentBalance} />
-                      </div>
-                      <s-text-field
-                        name="accountCurrentBalance"
-                        value={getSettingValue(values, "accountCurrentBalance")}
-                        error={errors.accountCurrentBalance || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Loading text</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountLoadingText} />
-                      </div>
-                      <s-text-field
-                        name="accountLoadingText"
-                        value={getSettingValue(values, "accountLoadingText")}
-                        error={errors.accountLoadingText || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Redeeming state text</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountRedeemingText} />
-                      </div>
-                      <s-text-field
-                        name="accountRedeemingText"
-                        value={getSettingValue(values, "accountRedeemingText")}
-                        error={errors.accountRedeemingText || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Redeem button text</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountRedeemButtonText} />
-                      </div>
-                      <s-text-field
-                        name="accountRedeemButtonText"
-                        value={getSettingValue(values, "accountRedeemButtonText")}
-                        error={errors.accountRedeemButtonText || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Redemption disabled message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountDisabledMsg} />
-                      </div>
-                      <s-text-field
-                        name="accountDisabledMsg"
-                        value={getSettingValue(values, "accountDisabledMsg")}
-                        error={errors.accountDisabledMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Not enough points message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountNotEnoughPtsMsg} />
-                      </div>
-                      <s-text-field
-                        name="accountNotEnoughPtsMsg"
-                        value={getSettingValue(values, "accountNotEnoughPtsMsg")}
-                        details="Use {remaining_points} as placeholder"
-                        error={errors.accountNotEnoughPtsMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Gift card success message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountGiftCardMsg} />
-                      </div>
-                      <s-text-field
-                        name="accountGiftCardMsg"
-                        value={getSettingValue(values, "accountGiftCardMsg")}
-                        details="Use {rewardCode} as placeholder"
-                        error={errors.accountGiftCardMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Error message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountErrorMsg} />
-                      </div>
-                      <s-text-field
-                        name="accountErrorMsg"
-                        value={getSettingValue(values, "accountErrorMsg")}
-                        error={errors.accountErrorMsg || undefined}
-                      ></s-text-field>
-                    </div>
-
-                    <div className="text-field-group">
-                      <div className="text-field-label-wrapper">
-                        <span>Configuration error message</span>
-                        <InfoIcon tooltip={TEXT_FIELD_DESCRIPTIONS.accountConfigErrorMsg} />
-                      </div>
-                      <s-text-field
-                        name="accountConfigErrorMsg"
-                        value={getSettingValue(values, "accountConfigErrorMsg")}
-                        error={errors.accountConfigErrorMsg || undefined}
-                      ></s-text-field>
-                    </div>
-                  </s-stack>
-                </section>
 
                 <div className="settings-actions">
                   <s-button
@@ -1980,23 +1627,4 @@ const settingsStyles = `
     line-height: 20px;
   }
 
-  .text-field-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .text-field-label-wrapper {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-weight: 650;
-    color: #202223;
-    font-size: 13px;
-    line-height: 20px;
-  }
-
-  .text-field-label-wrapper span {
-    display: block;
-  }
 `;

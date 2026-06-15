@@ -5,6 +5,11 @@ export const REWARD_ACTIVITY_TYPES = {
   DISCOUNT_APPLIED: "discount_applied",
   DISCOUNT_EXPIRED: "discount_expired",
   DISCOUNT_FAILED: "discount_failed",
+  GIFT_CARD_CREATED: "gift_card_created",
+  GIFT_CARD_APPLIED: "gift_card_applied",
+  GIFT_CARD_FAILED: "gift_card_failed",
+  STORE_CREDIT_CREATED: "store_credit_created",
+  STORE_CREDIT_FAILED: "store_credit_failed",
   POINTS_REFUNDED: "points_refunded",
 };
 

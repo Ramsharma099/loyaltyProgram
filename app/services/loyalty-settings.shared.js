@@ -68,12 +68,13 @@ export const DEFAULT_LOYALTY_SETTINGS = {
   accountAvailableLabel: "Available points",
   accountCurrentBalance: "Current balance",
   accountLoadingText: "Loading...",
-  accountRedeemingText: "Redeeming...",
-  accountRedeemButtonText: "Redeem gift card",
-  accountDisabledMsg: "Rewards redemption is currently disabled.",
-  accountNotEnoughPtsMsg: "Earn {remaining_points} more points to redeem a gift card.",
-  accountGiftCardMsg: "Gift card created: {rewardCode}",
-  accountErrorMsg: "Could not redeem gift card",
+  accountRedeemingText: "Converting...",
+  accountRedeemButtonText: "Convert to store credit",
+  accountDisabledMsg: "Store credit conversion is currently disabled.",
+  accountNotEnoughPtsMsg:
+    "Earn {remaining_points} more points to convert this amount.",
+  accountGiftCardMsg: "Store credit added: ${amount}",
+  accountErrorMsg: "Could not convert points to store credit",
   accountConfigErrorMsg: "Loyalty API URL is not configured.",
 };
 

@@ -6,6 +6,7 @@ import {
   ensureOrderWebhookSubscriptions,
   getPublicRequestOrigin,
 } from "../services/webhook-subscriptions.server";
+import { logError } from "../services/errors.server";
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
@@ -14,11 +15,9 @@ export const loader = async ({ request }) => {
   try {
     await ensureOrderWebhookSubscriptions(admin, origin);
   } catch (error) {
-    console.error("[webhook-subscriptions] Could not verify subscriptions", {
+    logError("app:webhook-subscriptions", error, {
       shop: session.shop,
       origin,
-      message: error.message,
-      stack: error.stack,
     });
   }
 

@@ -1,5 +1,9 @@
 import { authenticate } from "../shopify.server";
 import { addOrderRewardPoints } from "../services/order-points.server";
+import {
+  webhookAuthenticationError,
+  webhookProcessingError,
+} from "../services/errors.server";
 
 export const action = async ({ request }) => {
   let webhook;
@@ -7,9 +11,7 @@ export const action = async ({ request }) => {
   try {
     webhook = await authenticate.webhook(request);
   } catch (error) {
-    return new Response("Webhook authentication failed", {
-      status: 401,
-    });
+    return webhookAuthenticationError("orders/create", error);
   }
 
   const { shop, payload } = webhook;
@@ -21,10 +23,6 @@ export const action = async ({ request }) => {
       status: 200,
     });
   } catch (error) {
-    console.error("[orders/create] Webhook error", error);
-
-    return new Response("Webhook Error", {
-      status: 500,
-    });
+    return webhookProcessingError("orders/create", error, { shop });
   }
 };

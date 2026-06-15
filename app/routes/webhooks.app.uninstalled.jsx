@@ -1,8 +1,20 @@
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import {
+  webhookAuthenticationError,
+  webhookProcessingError,
+} from "../services/errors.server";
 
 export const action = async ({ request }) => {
-  const { shop } = await authenticate.webhook(request);
+  let webhook;
+
+  try {
+    webhook = await authenticate.webhook(request);
+  } catch (error) {
+    return webhookAuthenticationError("app/uninstalled", error);
+  }
+
+  const { shop } = webhook;
 
   try {
     await prisma.shop.deleteMany({
@@ -13,10 +25,6 @@ export const action = async ({ request }) => {
 
     return new Response("App uninstalled");
   } catch (error) {
-    console.error(error);
-
-    return new Response("Error", {
-      status: 500,
-    });
+    return webhookProcessingError("app/uninstalled", error, { shop });
   }
 };

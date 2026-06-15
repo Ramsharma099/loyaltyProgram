@@ -1,8 +1,20 @@
 import { authenticate } from "../shopify.server";
 import { addSignupBonus } from "../services/loyalty.server";
+import {
+  webhookAuthenticationError,
+  webhookProcessingError,
+} from "../services/errors.server";
 
 export const action = async ({ request }) => {
-  const { shop, payload } = await authenticate.webhook(request);
+  let webhook;
+
+  try {
+    webhook = await authenticate.webhook(request);
+  } catch (error) {
+    return webhookAuthenticationError("customers/create", error);
+  }
+
+  const { shop, payload } = webhook;
 
   try {
     if (!payload?.id) {
@@ -17,10 +29,6 @@ export const action = async ({ request }) => {
       status: 200,
     });
   } catch (error) {
-    console.error(error);
-
-    return new Response("Webhook Error", {
-      status: 500,
-    });
+    return webhookProcessingError("customers/create", error, { shop });
   }
 };

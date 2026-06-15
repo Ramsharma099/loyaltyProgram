@@ -1,4 +1,5 @@
 import { addOrderRewardPoints } from "../services/order-points.server";
+import { logError } from "../services/errors.server";
 
 export const loader = async () => {
   try {
@@ -26,11 +27,14 @@ export const loader = async () => {
       result,
     });
   } catch (error) {
-    console.error("[api/test-order] Manual order reward test failed", error);
+    logError("api:test-order", error);
 
-    return Response.json({
-      success: false,
-      error: error.message,
-    });
+    return Response.json(
+      {
+        success: false,
+        message: "Could not process the test order.",
+      },
+      { status: 500 },
+    );
   }
 };

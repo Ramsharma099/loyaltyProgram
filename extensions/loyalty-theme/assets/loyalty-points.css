@@ -3,6 +3,10 @@
   margin: 24px 0;
 }
 
+.loyalty-points-widget [hidden] {
+  display: none !important;
+}
+
 .loyalty-points-widget__inner {
   border: 1px solid rgba(var(--color-foreground, 18 18 18), 0.14);
   border-radius: 8px;
@@ -35,8 +39,24 @@
 }
 
 .loyalty-points-widget__balance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  border: 1px solid rgba(0, 128, 96, 0.22);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.loyalty-points-widget__balance-label {
+  color: #616a75;
+  font-size: 0.9em;
+}
+
+.loyalty-points-widget__balance-value {
   color: var(--loyalty-accent-color);
-  font-size: 1.1em;
+  font-size: 1.5em;
   font-weight: 700;
 }
 
@@ -69,7 +89,31 @@
 .loyalty-points-widget__reward {
   border: 1px solid rgba(var(--color-foreground, 18 18 18), 0.12);
   border-radius: 8px;
-  padding: 12px;
+  overflow: hidden;
+}
+
+.loyalty-points-widget__reward-button {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 14px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.loyalty-points-widget__reward-button:hover,
+.loyalty-points-widget__reward-button:focus-visible {
+  background: rgba(0, 128, 96, 0.05);
+  outline: 2px solid var(--loyalty-accent-color);
+  outline-offset: -2px;
+}
+
+.loyalty-points-widget__reward-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .loyalty-points-widget__reward-title,
@@ -84,4 +128,331 @@
 .loyalty-points-widget__reward-description {
   margin-top: 4px;
   opacity: 0.75;
+}
+
+.loyalty-points-widget__reward-cta {
+  display: block;
+  margin-top: 10px;
+  color: var(--loyalty-accent-color);
+  font-size: 0.86em;
+  font-weight: 700;
+}
+
+.loyalty-points-widget__reward-message {
+  margin: 0 0 10px;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #f6faf8;
+  color: #0c5132;
+}
+
+.loyalty-points-widget__reward-message--error {
+  background: #fff4f4;
+  color: #8e1f0b;
+}
+
+.loyalty-points-widget__see-more {
+  width: 100%;
+  margin-top: 12px;
+  border: 1px solid var(--loyalty-accent-color);
+  border-radius: 6px;
+  padding: 11px 14px;
+  background: transparent;
+  color: var(--loyalty-accent-color);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.loyalty-points-widget__see-more:hover,
+.loyalty-points-widget__see-more:focus-visible {
+  background: rgba(0, 128, 96, 0.05);
+}
+
+.loyalty-points-widget__see-more:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.loyalty-points-widget--floating {
+  position: fixed;
+  z-index: 9999;
+  right: 16px;
+  bottom: 16px;
+  left: auto;
+  width: min(380px, calc(100vw - 32px));
+  margin: 0;
+  font-family: inherit;
+}
+
+.loyalty-points-widget__launcher {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 52px;
+  margin-right: 0;
+  margin-left: auto;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 20px;
+  background: var(--loyalty-accent-color);
+  color: #fff;
+  box-shadow: 0 6px 20px rgba(32, 34, 35, 0.18);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.loyalty-points-widget__launcher-icon,
+.loyalty-points-widget__brand-icon {
+  font-size: 1.2em;
+}
+
+.loyalty-points-widget--floating .loyalty-points-widget__inner {
+  max-height: min(640px, calc(100vh - 96px));
+  margin-bottom: 12px;
+  overflow-y: auto;
+  border-color: rgba(32, 34, 35, 0.12);
+  background: #fff;
+  box-shadow: 0 12px 36px rgba(32, 34, 35, 0.22);
+}
+
+.loyalty-points-widget--floating .loyalty-points-widget__header {
+  text-align: center;
+}
+
+.loyalty-points-widget__panel-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: -4px -4px 12px;
+  color: var(--loyalty-accent-color);
+}
+
+.loyalty-points-widget__close {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: #f1f2f3;
+  color: #202223;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.loyalty-points-widget__guest-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.loyalty-points-widget__button {
+  border: 1px solid var(--loyalty-accent-color);
+  border-radius: 6px;
+  padding: 11px 14px;
+  color: var(--loyalty-accent-color);
+  text-align: center;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.loyalty-points-widget__button--primary {
+  background: var(--loyalty-accent-color);
+  color: #fff;
+}
+
+.loyalty-points-widget__actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.loyalty-points-widget__action,
+.loyalty-points-widget__action-link {
+  width: 100%;
+  border: 1px solid rgba(0, 128, 96, 0.22);
+  border-radius: 8px;
+  background: #fff;
+  color: #202223;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+
+.loyalty-points-widget__action summary,
+.loyalty-points-widget__action-link {
+  display: grid;
+  grid-template-columns: 24px 1fr 18px;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  cursor: pointer;
+  color: #202223;
+  list-style: none;
+}
+
+.loyalty-points-widget__action summary::-webkit-details-marker {
+  display: none;
+}
+
+.loyalty-points-widget__action summary span,
+.loyalty-points-widget__action-link span {
+  color: var(--loyalty-accent-color);
+  font-size: 1.2em;
+}
+
+.loyalty-points-widget__action p {
+  margin: -4px 14px 14px 46px;
+  opacity: 0.75;
+}
+
+.loyalty-points-widget__action-link--rewards {
+  grid-template-columns: 24px 1fr 18px;
+}
+
+.loyalty-points-widget__action-link--rewards strong,
+.loyalty-points-widget__action-link--rewards small {
+  display: block;
+}
+
+.loyalty-points-widget__action-link--rewards small {
+  margin-top: 3px;
+  color: #616a75;
+  font-size: 0.86em;
+}
+
+.loyalty-points-widget__view {
+  margin: -20px;
+  min-height: 480px;
+}
+
+.loyalty-points-widget__back {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 18px;
+  border: 0;
+  border-bottom: 1px solid #e3e5e7;
+  padding: 4px 0 14px;
+  background: transparent;
+  color: #202223;
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.05em;
+  font-weight: 700;
+  text-align: left;
+}
+
+.loyalty-points-widget__view-header {
+  position: sticky;
+  z-index: 2;
+  top: -20px;
+  display: grid;
+  grid-template-columns: 36px 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #e3e5e7;
+}
+
+.loyalty-points-widget__view-header .loyalty-points-widget__back {
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font-size: 1.6em;
+}
+
+.loyalty-points-widget__view-header strong,
+.loyalty-points-widget__view-header small {
+  display: block;
+}
+
+.loyalty-points-widget__view-header small {
+  margin-top: 2px;
+  color: #616a75;
+  font-size: 0.75em;
+}
+
+.loyalty-points-widget__view-close {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  color: #202223;
+  cursor: pointer;
+  font-size: 1.5em;
+}
+
+.loyalty-points-widget__view-content {
+  padding: 22px 20px;
+}
+
+.loyalty-points-widget__view-content h3 {
+  margin: 0 0 14px;
+  font-size: 1.05em;
+}
+
+.loyalty-points-widget__method-list {
+  display: grid;
+}
+
+.loyalty-points-widget__method {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 12px;
+  padding: 16px 4px;
+  border-bottom: 1px solid #e3e5e7;
+}
+
+.loyalty-points-widget__method > span {
+  color: var(--loyalty-accent-color);
+  font-size: 1.25em;
+}
+
+.loyalty-points-widget__method strong,
+.loyalty-points-widget__method p {
+  margin: 0;
+}
+
+.loyalty-points-widget__method p {
+  margin-top: 4px;
+  color: #616a75;
+  font-size: 0.9em;
+}
+
+.loyalty-points-widget__view .loyalty-points-widget__reward-list {
+  gap: 0;
+}
+
+.loyalty-points-widget__view .loyalty-points-widget__reward {
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.loyalty-points-widget__view .loyalty-points-widget__reward-button {
+  padding: 16px 4px;
+}
+
+.loyalty-points-widget__view .loyalty-points-widget__reward-button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+@media (max-width: 480px) {
+  .loyalty-points-widget--floating {
+    right: 12px;
+    bottom: 12px;
+    left: auto;
+    width: min(380px, calc(100vw - 24px));
+  }
+
+  .loyalty-points-widget--floating .loyalty-points-widget__inner {
+    max-height: calc(100vh - 84px);
+  }
 }

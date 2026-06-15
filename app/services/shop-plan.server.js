@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { INTEGRATION_OPTIONS } from "./integrations.shared";
+import { runShopifyGraphql } from "./errors.server";
 
 export function canUseCheckoutIntegration(shop) {
   return Boolean(shop?.isShopifyPlus || shop?.isPartnerDevelopment);
@@ -64,7 +65,8 @@ export function getShopPlanSelect() {
 }
 
 export async function fetchShopPlan(admin) {
-  const response = await admin.graphql(
+  const data = await runShopifyGraphql(
+    admin,
     `#graphql
       query ShopPlan {
         shop {
@@ -76,14 +78,14 @@ export async function fetchShopPlan(admin) {
         }
       }
     `,
+    { operation: "Fetch Shopify shop plan" },
   );
-  const result = await response.json();
 
-  if (result.errors?.length) {
-    throw new Error(JSON.stringify(result.errors));
+  if (!data.shop?.plan) {
+    throw new Error("Shopify did not return shop plan details.");
   }
 
-  return result.data.shop.plan;
+  return data.shop.plan;
 }
 
 export async function syncShopPlan(shopDomain, admin) {

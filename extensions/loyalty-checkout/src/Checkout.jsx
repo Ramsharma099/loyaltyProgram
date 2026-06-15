@@ -1,6 +1,7 @@
 import "@shopify/ui-extensions/preact";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { fetchApiJson } from "./api";
 
 const DEFAULT_REWARD_OPTIONS = [
   {
@@ -27,9 +28,6 @@ const DEFAULT_REWARD_OPTIONS = [
   },
 ];
 
-const DEFAULT_LOGIN_MESSAGE = "Sign in to use loyalty points.";
-const DEFAULT_DESCRIPTION = "You have {coupon_amount} available {reward_label}";
-const DEFAULT_REWARD_PROMPT = "Choose a {reward_singular}";
 const REWARD_TYPE_PREFERENCES = ["gift_card", "discount", "both"];
 
 function getSettingValue(settings, key, fallback) {
@@ -162,7 +160,7 @@ function Extension() {
 
   const apiBaseUrl =
     settings?.api_base_url ||
-    "https://singh-prospects-introducing-thus.trycloudflare.com";
+    "https://cindy-bill-tan-roger.trycloudflare.com";
 
   const [checkoutCustomer, setCheckoutCustomer] = useState(
     shopify.buyerIdentity.customer.current,
@@ -181,7 +179,7 @@ function Extension() {
 
   const [isLoading, setIsLoading] = useState(Boolean(checkoutCustomer));
 
-  const [isRedeeming, setIsRedeeming] = useState(false);
+  const [redeemingReward, setRedeemingReward] = useState("");
 
   const [message, setMessage] = useState("");
 
@@ -301,15 +299,15 @@ function Extension() {
           shop: shopify.shop?.myshopifyDomain || "",
         });
 
-        const response = await fetch(
+        const data = await fetchApiJson(
           `${apiBaseUrl}/api/loyalty-balance?${params}`,
+          undefined,
+          "Could not load points. Please try again.",
         );
-
-        const data = await response.json();
 
         if (!isCurrent) return;
 
-        if (!response.ok || !data.success) {
+        if (!data.success) {
           throw new Error(data.message || "Could not load points");
         }
 
@@ -375,25 +373,27 @@ function Extension() {
       return;
     }
 
-    setIsRedeeming(true);
+    setRedeemingReward(getRewardValue(reward));
     setMessage("");
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/redeem-points`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const data = await fetchApiJson(
+        `${apiBaseUrl}/api/redeem-points`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            customerId,
+            pointsToRedeem: reward.points,
+            rewardType: reward.type || "discount",
+          }),
         },
-        body: JSON.stringify({
-          customerId,
-          pointsToRedeem: reward.points,
-          rewardType: reward.type || "discount",
-        }),
-      });
+        errorMsg,
+      );
 
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
+      if (!data.success || !data.reward) {
         throw new Error(data.message || errorMsg);
       }
 
@@ -414,7 +414,7 @@ function Extension() {
       console.error(error);
       setMessage(error.message || errorMsg);
     } finally {
-      setIsRedeeming(false);
+      setRedeemingReward("");
     }
   };
 
@@ -470,6 +470,7 @@ function Extension() {
               {checkoutRewardOptions.map((reward) => {
                 const rewardValue = getRewardValue(reward);
                 const isSelected = selectedReward === rewardValue;
+                const isRedeeming = redeemingReward === rewardValue;
 
                 return (
                   <s-box
@@ -497,7 +498,9 @@ function Extension() {
 
                       <s-button
                         kind={isSelected ? "primary" : undefined}
-                        disabled={points < reward.points || isRedeeming}
+                        disabled={
+                          points < reward.points || Boolean(redeemingReward)
+                        }
                         onClick={() => {
                           setSelectedReward(rewardValue);
                           setMessage("");

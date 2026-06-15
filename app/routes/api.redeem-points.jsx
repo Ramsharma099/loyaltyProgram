@@ -2,6 +2,7 @@ import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import {
   DEFAULT_LOYALTY_SETTINGS,
+  SPECIAL_REWARD_OPTIONS,
   getRewardOptionsForPreference,
 } from "../services/loyalty-settings.server";
 import {
@@ -11,6 +12,12 @@ import {
   tryCreateRewardActivityLog,
 } from "../services/reward-activity.server";
 import { isRewardsRedemptionEnabled } from "../services/shop-plan.server";
+import {
+  AppError,
+  logError,
+  parseJsonRequest,
+  runShopifyGraphql,
+} from "../services/errors.server";
 
 // CORS HEADERS
 const corsHeaders = {
@@ -19,6 +26,56 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 const DISCOUNT_EXPIRY_HOURS = 24;
+const storeCreditReward = SPECIAL_REWARD_OPTIONS.find(
+  (reward) => reward.type === "store_credit",
+);
+
+function normalizeShopDomain(shop) {
+  if (!shop) {
+    return null;
+  }
+
+  try {
+    return new URL(shop).hostname;
+  } catch {
+    return String(shop).trim() || null;
+  }
+}
+
+function getShopifyCustomerId(customerId) {
+  if (!customerId) {
+    return null;
+  }
+
+  return String(customerId).split("/").pop();
+}
+
+function getSelectedReward(rewardOptions, rewardType, redeemPoints) {
+  const exactReward = rewardOptions.find(
+    (reward) =>
+      reward.points === redeemPoints &&
+      (reward.type || "discount") === rewardType,
+  );
+
+  if (exactReward || rewardType !== "store_credit" || !storeCreditReward) {
+    return exactReward;
+  }
+
+  if (redeemPoints % storeCreditReward.points !== 0) {
+    return null;
+  }
+
+  return {
+    ...storeCreditReward,
+    points: redeemPoints,
+    amount: Number(
+      (
+        storeCreditReward.amount *
+        (redeemPoints / storeCreditReward.points)
+      ).toFixed(2),
+    ),
+  };
+}
 
 function isMissingLoyaltySettingFieldError(error) {
   const message = String(error?.message || "");
@@ -106,17 +163,10 @@ async function isRewardsRedemptionEnabledForShop(shopId) {
 }
 
 async function runAdminGraphql(admin, mutation, variables) {
-  const response = await admin.graphql(mutation, {
+  return runShopifyGraphql(admin, mutation, {
     variables,
+    operation: "Issue Shopify loyalty reward",
   });
-
-  const result = await response.json();
-
-  if (result.errors?.length) {
-    throw new Error(JSON.stringify(result.errors));
-  }
-
-  return result.data;
 }
 
 async function getShopCurrencyCode(admin) {
@@ -156,9 +206,14 @@ export const action = async ({ request }) => {
   let redemptionFailureContext = null;
 
   try {
-    const body = await request.json();
+    const body = await parseJsonRequest(request, "redeem points");
 
-    const { customerId, pointsToRedeem, rewardType = "discount" } = body;
+    const {
+      customerId,
+      shop,
+      pointsToRedeem,
+      rewardType = "discount",
+    } = body;
 
     const redeemPoints = Number(pointsToRedeem);
 
@@ -176,15 +231,43 @@ export const action = async ({ request }) => {
     }
 
     // FIND CUSTOMER
-    const customer = await prisma.customer.findUnique({
-      where: {
-        id: Number(customerId),
-      },
+    const appCustomerId = Number(customerId);
+    const shopDomain = normalizeShopDomain(shop);
+    let customer = Number.isInteger(appCustomerId)
+      ? await prisma.customer.findUnique({
+          where: {
+            id: appCustomerId,
+          },
+          include: {
+            shop: true,
+          },
+        })
+      : null;
 
-      include: {
-        shop: true,
-      },
-    });
+    if (!customer && shopDomain) {
+      customer = await prisma.customer.findFirst({
+        where: {
+          shopifyCustomerId: getShopifyCustomerId(customerId),
+          shop: {
+            shopDomain,
+          },
+        },
+        include: {
+          shop: true,
+        },
+      });
+    }
+
+    if (!customer) {
+      customer = await prisma.customer.findFirst({
+        where: {
+          shopifyCustomerId: getShopifyCustomerId(customerId),
+        },
+        include: {
+          shop: true,
+        },
+      });
+    }
 
     if (!customer) {
       return Response.json(
@@ -229,6 +312,19 @@ export const action = async ({ request }) => {
         });
       }
 
+      if (rewardType === "gift_card") {
+        await tryCreateRewardActivityLog({
+          customerId: customer.id,
+          activityType: REWARD_ACTIVITY_TYPES.GIFT_CARD_FAILED,
+          message:
+            "Gift card redemption failed because points were insufficient.",
+          metadata: {
+            pointsToRedeem: redeemPoints,
+            availablePoints: customer.loyaltyPoints,
+          },
+        });
+      }
+
       return Response.json(
         {
           success: false,
@@ -256,10 +352,10 @@ export const action = async ({ request }) => {
     const availablePoints =
       customer.loyaltyPoints - (pendingRedemptions._sum.pointsUsed || 0);
 
-    const selectedReward = rewardOptions.find(
-      (reward) =>
-        reward.points === redeemPoints &&
-        (reward.type || "discount") === rewardType,
+    const selectedReward = getSelectedReward(
+      rewardOptions,
+      rewardType,
+      redeemPoints,
     );
 
     if (!selectedReward) {
@@ -269,6 +365,19 @@ export const action = async ({ request }) => {
           activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_FAILED,
           message:
             "Discount redemption failed because the selected reward is not available.",
+          metadata: {
+            pointsToRedeem: redeemPoints,
+            rewardType,
+          },
+        });
+      }
+
+      if (rewardType === "gift_card") {
+        await tryCreateRewardActivityLog({
+          customerId: customer.id,
+          activityType: REWARD_ACTIVITY_TYPES.GIFT_CARD_FAILED,
+          message:
+            "Gift card redemption failed because the selected reward is not available.",
           metadata: {
             pointsToRedeem: redeemPoints,
             rewardType,
@@ -302,6 +411,19 @@ export const action = async ({ request }) => {
           activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_FAILED,
           message:
             "Discount redemption failed because available points are reserved by pending discounts.",
+          metadata: {
+            pointsToRedeem: redeemPoints,
+            availablePoints,
+          },
+        });
+      }
+
+      if (rewardType === "gift_card") {
+        await tryCreateRewardActivityLog({
+          customerId: customer.id,
+          activityType: REWARD_ACTIVITY_TYPES.GIFT_CARD_FAILED,
+          message:
+            "Gift card redemption failed because available points are reserved by pending discounts.",
           metadata: {
             pointsToRedeem: redeemPoints,
             availablePoints,
@@ -397,6 +519,36 @@ export const action = async ({ request }) => {
         });
       }
 
+      if (rewardTypeForStorage === "gift_card") {
+        await createRewardActivityLog(tx, {
+          customerId: customer.id,
+          rewardId: createdReward.id,
+          rewardCode: createdReward.rewardCode,
+          activityType: REWARD_ACTIVITY_TYPES.GIFT_CARD_CREATED,
+          message: "Gift card created and issued successfully.",
+          metadata: {
+            amount: issuedReward.amount,
+            pointsUsed: redeemPoints,
+            rewardType: rewardTypeForStorage,
+          },
+        });
+      }
+
+      if (rewardTypeForStorage === "store_credit") {
+        await createRewardActivityLog(tx, {
+          customerId: customer.id,
+          rewardId: createdReward.id,
+          rewardCode: createdReward.rewardCode,
+          activityType: REWARD_ACTIVITY_TYPES.STORE_CREDIT_CREATED,
+          message: "Store credit added successfully.",
+          metadata: {
+            amount: issuedReward.amount,
+            pointsUsed: redeemPoints,
+            rewardType: rewardTypeForStorage,
+          },
+        });
+      }
+
       return createdReward;
     });
 
@@ -430,23 +582,53 @@ export const action = async ({ request }) => {
       );
     }
 
-    console.error("Redeem error:", error, error?.stack);
+    logError("redeem-points", error, {
+      customerId: redemptionFailureContext?.customerId,
+      rewardType: redemptionFailureContext?.selectedReward?.type,
+    });
 
-    if (
-      redemptionFailureContext &&
-      (redemptionFailureContext.selectedReward?.type || "discount") ===
-        "discount"
-    ) {
-      await tryCreateRewardActivityLog({
-        customerId: redemptionFailureContext.customerId,
-        rewardCode: redemptionFailureContext.rewardCode,
-        activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_FAILED,
-        message: error?.message || "Could not create discount code.",
-        metadata: {
-          pointsToRedeem: redemptionFailureContext.pointsToRedeem,
-          selectedReward: redemptionFailureContext.selectedReward,
-        },
-      });
+    if (redemptionFailureContext) {
+      const failedRewardType =
+        redemptionFailureContext.selectedReward?.type || "discount";
+
+      if (failedRewardType === "discount") {
+        await tryCreateRewardActivityLog({
+          customerId: redemptionFailureContext.customerId,
+          rewardCode: redemptionFailureContext.rewardCode,
+          activityType: REWARD_ACTIVITY_TYPES.DISCOUNT_FAILED,
+          message: error?.message || "Could not create discount code.",
+          metadata: {
+            pointsToRedeem: redemptionFailureContext.pointsToRedeem,
+            selectedReward: redemptionFailureContext.selectedReward,
+          },
+        });
+      }
+
+      if (failedRewardType === "gift_card") {
+        await tryCreateRewardActivityLog({
+          customerId: redemptionFailureContext.customerId,
+          rewardCode: redemptionFailureContext.rewardCode,
+          activityType: REWARD_ACTIVITY_TYPES.GIFT_CARD_FAILED,
+          message: error?.message || "Could not create gift card.",
+          metadata: {
+            pointsToRedeem: redemptionFailureContext.pointsToRedeem,
+            selectedReward: redemptionFailureContext.selectedReward,
+          },
+        });
+      }
+
+      if (failedRewardType === "store_credit") {
+        await tryCreateRewardActivityLog({
+          customerId: redemptionFailureContext.customerId,
+          rewardCode: redemptionFailureContext.rewardCode,
+          activityType: REWARD_ACTIVITY_TYPES.STORE_CREDIT_FAILED,
+          message: error?.message || "Could not add store credit.",
+          metadata: {
+            pointsToRedeem: redemptionFailureContext.pointsToRedeem,
+            selectedReward: redemptionFailureContext.selectedReward,
+          },
+        });
+      }
     }
 
     if (isStoreCreditPermissionError(error)) {
@@ -466,7 +648,11 @@ export const action = async ({ request }) => {
     return Response.json(
       {
         success: false,
-        message: error?.message || "Could not redeem points",
+        message:
+          error instanceof AppError && error.status < 500
+            ? error.message
+            : "Could not redeem points. Please try again.",
+        code: error instanceof AppError ? error.code : "INTERNAL_ERROR",
       },
       {
         status: 500,

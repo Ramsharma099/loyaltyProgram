@@ -10,12 +10,12 @@ type = "ui_extension"
 uid = "8ea3c599-0904-df5e-db42-642a579c982e53dc2001"
 
 [[extensions.targeting]]
-module = "./src/CustomerAccount.jsx"
+module = "./src/OrderIndex.jsx"
 target = "customer-account.order-index.block.render"
 default_placement = "ORDER_INDEX"
 
 [[extensions.targeting]]
-module = "./src/CustomerAccount.jsx"
+module = "./src/Profile.jsx"
 target = "customer-account.profile.block.render"
 default_placement = "PROFILE1"
 
@@ -34,7 +34,7 @@ description = "HTTPS URL of the app backend, for example the Shopify CLI tunnel 
 key = "accountLoginMessage"
 type = "single_line_text_field"
 name = "Login message"
-description = "Message shown when customer is not logged in."
+description = "Message shown when the customer is not signed in."
 
 [[extensions.settings.fields]]
 key = "accountBalanceTitle"
@@ -55,6 +55,24 @@ name = "Current balance label"
 description = "Label for current balance display."
 
 [[extensions.settings.fields]]
+key = "accountStoreCreditTitle"
+type = "single_line_text_field"
+name = "Store credit section title"
+description = "Title shown above the store credit conversion controls."
+
+[[extensions.settings.fields]]
+key = "accountConversionRateText"
+type = "single_line_text_field"
+name = "Conversion rate text"
+description = "Store credit conversion rate. Use {points} and {amount} placeholders."
+
+[[extensions.settings.fields]]
+key = "accountCreditPreviewText"
+type = "single_line_text_field"
+name = "Credit preview text"
+description = "Preview of the store credit customers will receive. Use {amount} placeholder."
+
+[[extensions.settings.fields]]
 key = "accountLoadingText"
 type = "single_line_text_field"
 name = "Loading state text"
@@ -63,41 +81,74 @@ description = "Text shown while loading."
 [[extensions.settings.fields]]
 key = "accountRedeemingText"
 type = "single_line_text_field"
-name = "Redeeming state text"
-description = "Text shown while redeeming is in progress."
+name = "Converting state text"
+description = "Text shown while points are being converted to store credit."
 
 [[extensions.settings.fields]]
 key = "accountRedeemButtonText"
 type = "single_line_text_field"
-name = "Redeem button text"
-description = "Text for the redeem button."
+name = "Convert button text"
+description = "Text for the store credit conversion button."
 
 [[extensions.settings.fields]]
 key = "accountDisabledMsg"
 type = "single_line_text_field"
-name = "Redemption disabled message"
-description = "Message when rewards redemption is disabled."
+name = "Conversion disabled message"
+description = "Message when store credit conversion is disabled."
 
 [[extensions.settings.fields]]
 key = "accountNotEnoughPtsMsg"
 type = "single_line_text_field"
 name = "Not enough points message"
-description = "Message when customer doesn't have enough points. Use {remaining_points} placeholder."
+description = "Message when the customer cannot convert the selected amount. Use {remaining_points} placeholder."
 
 [[extensions.settings.fields]]
 key = "accountGiftCardMsg"
 type = "single_line_text_field"
-name = "Gift card success message"
-description = "Success message for gift card redemption. Use {rewardCode} placeholder."
+name = "Store credit success message"
+description = "Success message after store credit conversion. Use {amount} placeholder."
 
 [[extensions.settings.fields]]
 key = "accountErrorMsg"
 type = "single_line_text_field"
-name = "Redemption error message"
-description = "Generic error message when redemption fails."
+name = "Conversion error message"
+description = "Generic error message when store credit conversion fails."
 
 [[extensions.settings.fields]]
 key = "accountConfigErrorMsg"
 type = "single_line_text_field"
 name = "Configuration error message"
-description = "Message when API URL is not configured."
+description = "Message shown when the loyalty API URL is missing."
+
+[[extensions]]
+name = "loyalty-reward-history"
+handle = "loyalty-reward-history"
+type = "ui_extension"
+uid = "1c392a4b-09c7-4c37-a9f5-c5b784f7ee58"
+
+[[extensions.targeting]]
+module = "./src/RewardHistoryPage.jsx"
+target = "customer-account.page.render"
+
+[extensions.capabilities]
+api_access = true
+network_access = true
+
+[extensions.settings]
+[[extensions.settings.fields]]
+key = "api_base_url"
+type = "single_line_text_field"
+name = "API base URL"
+description = "HTTPS URL of the app backend, for example the Shopify CLI tunnel URL."
+
+[[extensions.settings.fields]]
+key = "accountLoginMessage"
+type = "single_line_text_field"
+name = "Login message"
+description = "Message shown when the customer is not signed in."
+
+[[extensions.settings.fields]]
+key = "accountLoadingText"
+type = "single_line_text_field"
+name = "Loading state text"
+description = "Text shown while loading."

@@ -3,6 +3,7 @@ import { unauthenticated } from "../shopify.server";
 import {
   DEFAULT_LOYALTY_SETTINGS,
   DEFAULT_REWARD_OPTIONS,
+  SPECIAL_REWARD_OPTIONS,
   getRewardTypePreferenceFromSettings,
   getRewardOptionsForPreference,
 } from "../services/loyalty-settings.server";
@@ -16,6 +17,11 @@ import {
   ensureOrderWebhookSubscriptions,
   getPublicRequestOrigin,
 } from "../services/webhook-subscriptions.server";
+import {
+  logError,
+  parseJsonRequest,
+  runShopifyGraphql,
+} from "../services/errors.server";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -24,6 +30,9 @@ const CORS_HEADERS = {
 };
 
 const checkedWebhookSubscriptions = new Set();
+const storeCreditReward = SPECIAL_REWARD_OPTIONS.find(
+  (reward) => reward.type === "store_credit",
+);
 
 const TEXT_SETTINGS_FIELDS = [
   "checkoutLoginMessage",
@@ -102,6 +111,61 @@ function normalizeShopDomain(shop) {
     return new URL(shop).hostname;
   } catch {
     return String(shop).trim() || null;
+  }
+}
+
+async function getStoreCreditBalance(shopDomain, shopifyCustomerId) {
+  if (!shopDomain || !shopifyCustomerId) {
+    return null;
+  }
+
+  try {
+    const { admin } = await unauthenticated.admin(shopDomain);
+    const data = await runShopifyGraphql(
+      admin,
+      `#graphql
+        query CustomerStoreCreditBalance($id: ID!) {
+          customer(id: $id) {
+            storeCreditAccounts(first: 10) {
+              nodes {
+                balance {
+                  amount
+                  currencyCode
+                }
+              }
+            }
+          }
+        }
+      `,
+      {
+        variables: {
+          id: `gid://shopify/Customer/${shopifyCustomerId}`,
+        },
+        operation: "Load Shopify store credit balance",
+      },
+    );
+
+    const balances =
+      data.customer?.storeCreditAccounts?.nodes
+        ?.map((account) => account.balance)
+        .filter(Boolean) || [];
+
+    if (balances.length === 0) {
+      return { amount: 0, currencyCode: null };
+    }
+
+    const currencyCode = balances[0].currencyCode;
+    const amount = balances
+      .filter((balance) => balance.currencyCode === currencyCode)
+      .reduce((total, balance) => total + Number(balance.amount || 0), 0);
+
+    return { amount, currencyCode };
+  } catch (error) {
+    logError("loyalty-balance:store-credit", error, {
+      shopDomain,
+      shopifyCustomerId,
+    });
+    return null;
   }
 }
 
@@ -303,6 +367,7 @@ async function getLoyaltyBalance(customerId, shop) {
       success: true,
       customerId: null,
       loyaltyPoints: 0,
+      storeCreditReward,
       ...integrationStatus,
       ...textSettings,
     });
@@ -325,12 +390,18 @@ async function getLoyaltyBalance(customerId, shop) {
   const textSettings = buildTextSettingsResponse(
     customer.shop?.loyaltySetting,
   );
+  const storeCreditBalance = await getStoreCreditBalance(
+    customer.shop?.shopDomain || shopDomain,
+    shopifyCustomerId,
+  );
 
   return json({
     success: true,
     customerId: customer.id,
     loyaltyPoints: customer.loyaltyPoints,
     rewardOptions,
+    storeCreditReward,
+    storeCreditBalance,
     checkoutRedemptionEnabled: rewardsRedemptionEnabled,
     checkoutIntegrationEnabled: checkoutRedemptionEnabled,
     effectiveIntegration,
@@ -357,11 +428,9 @@ async function ensureWebhooksFromPublicRequest(shopDomain, origin) {
     await ensureOrderWebhookSubscriptions(admin, origin);
     checkedWebhookSubscriptions.add(cacheKey);
   } catch (error) {
-    console.error("[loyalty-balance] Webhook subscription check failed", {
+    logError("loyalty-balance:webhook-subscriptions", error, {
       shopDomain,
       origin,
-      message: error.message,
-      stack: error.stack,
     });
   }
 }
@@ -377,7 +446,7 @@ export const loader = async ({ request }) => {
 
     return getLoyaltyBalance(url.searchParams.get("customerId"), shop);
   } catch (error) {
-    console.error("Loyalty balance error:", error);
+    logError("loyalty-balance:loader", error);
 
     return json(
       {
@@ -398,7 +467,7 @@ export const action = async ({ request }) => {
   }
 
   try {
-    const body = await request.json();
+    const body = await parseJsonRequest(request, "loyalty balance");
     const shopDomain = normalizeShopDomain(body.shop);
     const origin = getPublicRequestOrigin(request);
 
@@ -406,7 +475,7 @@ export const action = async ({ request }) => {
 
     return getLoyaltyBalance(body.customerId, body.shop);
   } catch (error) {
-    console.error("Loyalty balance error:", error);
+    logError("loyalty-balance:action", error);
 
     return json(
       {
@@ -414,7 +483,7 @@ export const action = async ({ request }) => {
         message: "Could not load points",
         rewardOptions: DEFAULT_REWARD_OPTIONS,
       },
-      { status: 500 },
+      { status: error?.status === 400 ? 400 : 500 },
     );
   }
 };

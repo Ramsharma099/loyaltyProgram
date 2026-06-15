@@ -2,12 +2,16 @@ import { useLoaderData } from "react-router";
 
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import { runShopifyGraphql } from "../services/errors.server";
 
 const activityLabels = {
   discount_created: "Discount created",
   discount_applied: "Discount applied",
   discount_expired: "Discount expired",
   discount_failed: "Discount failed",
+  gift_card_created: "Gift card created",
+  gift_card_applied: "Gift card applied",
+  gift_card_failed: "Gift card failed",
   points_refunded: "Points refunded",
 };
 
@@ -16,6 +20,9 @@ const statusTone = {
   discount_applied: "success",
   discount_expired: "warning",
   discount_failed: "critical",
+  gift_card_created: "info",
+  gift_card_applied: "success",
+  gift_card_failed: "critical",
   points_refunded: "success",
 };
 
@@ -25,11 +32,30 @@ const emptyTotals = {
   applied: 0,
   expired: 0,
   failed: 0,
+  giftCardCreated: 0,
+  giftCardApplied: 0,
+  giftCardFailed: 0,
   refunded: 0,
 };
 
 function getActivityLabel(activityType) {
   return activityLabels[activityType] || activityType || "Activity";
+}
+
+function getRewardType(item) {
+  return (
+    item.reward?.rewardType ||
+    getMetadataValue(item.metadata, "rewardType") ||
+    (item.activityType?.startsWith("gift_card") ? "gift_card" : "discount")
+  );
+}
+
+function getRewardTypeLabel(item) {
+  return getRewardType(item) === "gift_card" ? "Gift card" : "Discount";
+}
+
+function getRewardTypeClass(item) {
+  return getRewardType(item) === "gift_card" ? "gift-card" : "discount";
 }
 
 function getMetadataValue(metadata, key) {
@@ -62,16 +88,10 @@ function getOrderAdminUrl(shopDomain, orderId) {
 }
 
 async function runAdminGraphql(admin, query, variables) {
-  const response = await admin.graphql(query, {
+  return runShopifyGraphql(admin, query, {
     variables,
+    operation: "Load Shopify order names",
   });
-  const result = await response.json();
-
-  if (result.errors?.length) {
-    throw new Error(JSON.stringify(result.errors));
-  }
-
-  return result.data;
 }
 
 function getOrderIdFromLog(item) {
@@ -194,6 +214,9 @@ export const loader = async ({ request }) => {
       if (item.activityType === "discount_applied") counts.applied += 1;
       if (item.activityType === "discount_expired") counts.expired += 1;
       if (item.activityType === "discount_failed") counts.failed += 1;
+      if (item.activityType === "gift_card_created") counts.giftCardCreated += 1;
+      if (item.activityType === "gift_card_applied") counts.giftCardApplied += 1;
+      if (item.activityType === "gift_card_failed") counts.giftCardFailed += 1;
       if (item.activityType === "points_refunded") counts.refunded += 1;
 
       return counts;
@@ -204,6 +227,9 @@ export const loader = async ({ request }) => {
       applied: 0,
       expired: 0,
       failed: 0,
+      giftCardCreated: 0,
+      giftCardApplied: 0,
+      giftCardFailed: 0,
       refunded: 0,
     },
   );
@@ -243,10 +269,13 @@ export default function HistoryPage() {
 
   const metrics = [
     ["All activity", totals.all],
-    ["Created", totals.created],
-    ["Applied", totals.applied],
-    ["Expired", totals.expired],
-    ["Failed", totals.failed],
+    ["Discounts created", totals.created],
+    ["Discounts applied", totals.applied],
+    ["Discounts expired", totals.expired],
+    ["Discounts failed", totals.failed],
+    ["Gift cards created", totals.giftCardCreated],
+    ["Gift cards applied", totals.giftCardApplied],
+    ["Gift card failures", totals.giftCardFailed],
     ["Points refunded", totals.refunded],
   ];
 
@@ -267,7 +296,7 @@ export default function HistoryPage() {
         <section className="history-panel" aria-labelledby="activity-heading">
           <div className="panel-header">
             <div>
-              <h2 id="activity-heading">Discount activity</h2>
+              <h2 id="activity-heading">Reward activity</h2>
               <p>
                 Latest {numberFormatter.format(history.length)} history logs
               </p>
@@ -288,7 +317,7 @@ export default function HistoryPage() {
                   <tr>
                     <th>Activity</th>
                     <th>Customer</th>
-                    <th>Discount code</th>
+                    <th>Reward code</th>
                     <th className="numeric">Points</th>
                     <th className="numeric">Amount</th>
                     <th>Order</th>
@@ -321,13 +350,18 @@ export default function HistoryPage() {
                     return (
                       <tr key={item.id}>
                         <td>
-                          <span
-                            className={`activity-pill ${
-                              statusTone[item.activityType] || "neutral"
-                            }`}
-                          >
-                            {getActivityLabel(item.activityType)}
-                          </span>
+                          <div className="activity-badges">
+                            <span
+                              className={`activity-pill ${
+                                statusTone[item.activityType] || "neutral"
+                              }`}
+                            >
+                              {getActivityLabel(item.activityType)}
+                            </span>
+                            <span className={`reward-type-pill ${getRewardTypeClass(item)}`}>
+                              {getRewardTypeLabel(item)}
+                            </span>
+                          </div>
                         </td>
                         <td>
                           <div className="customer">
@@ -374,8 +408,8 @@ export default function HistoryPage() {
             <div className="empty-state">
               <h3>No reward history yet</h3>
               <p>
-                Discount creation, application, expiry, failure, and refund logs
-                will appear here.
+                Reward creation, application, expiry, failure, gift card logs,
+                and refund events will appear here.
               </p>
             </div>
           )}
@@ -515,6 +549,35 @@ const historyStyles = `
   .activity-pill.critical {
     background: #fed3d1;
     color: #8e1f0b;
+  }
+
+  .activity-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .reward-type-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .reward-type-pill.discount {
+    background: #eef4ff;
+    color: #1d4ed8;
+  }
+
+  .reward-type-pill.gift-card {
+    background: #f7f5ff;
+    color: #6b21a8;
   }
 
   .activity-pill.neutral {

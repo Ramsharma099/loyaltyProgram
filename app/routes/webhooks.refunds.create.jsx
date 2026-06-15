@@ -8,6 +8,10 @@ import {
   createRewardActivityLog,
   REWARD_ACTIVITY_TYPES,
 } from "../services/reward-activity.server";
+import {
+  webhookAuthenticationError,
+  webhookProcessingError,
+} from "../services/errors.server";
 
 function getOrderId(payload) {
   return String(
@@ -22,10 +26,18 @@ function getOrderName(payload) {
 }
 
 export const action = async ({ request }) => {
-  const { payload, shop } = await authenticate.webhook(request);
+  let webhook;
 
   try {
-    const customerData = payload.order.customer;
+    webhook = await authenticate.webhook(request);
+  } catch (error) {
+    return webhookAuthenticationError("refunds/create", error);
+  }
+
+  const { payload, shop } = webhook;
+
+  try {
+    const customerData = payload?.order?.customer;
 
     if (!customerData) {
       return new Response("No customer");
@@ -143,10 +155,6 @@ export const action = async ({ request }) => {
 
     return new Response("Refund processed");
   } catch (error) {
-    console.error(error);
-
-    return new Response("Error", {
-      status: 500,
-    });
+    return webhookProcessingError("refunds/create", error, { shop });
   }
 };

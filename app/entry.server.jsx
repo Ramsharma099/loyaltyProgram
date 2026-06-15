@@ -4,6 +4,7 @@ import { ServerRouter } from "react-router";
 import { createReadableStreamFromReadable } from "@react-router/node";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
+import { logError } from "./services/errors.server";
 
 export const streamTimeout = 5000;
 
@@ -35,11 +36,12 @@ export default async function handleRequest(
           pipe(body);
         },
         onShellError(error) {
+          logError("server-render:shell", error, { url: request.url });
           reject(error);
         },
         onError(error) {
           responseStatusCode = 500;
-          console.error(error);
+          logError("server-render", error, { url: request.url });
         },
       },
     );

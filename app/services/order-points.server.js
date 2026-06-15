@@ -10,6 +10,8 @@ import {
   tryCreateRewardActivityLog,
 } from "./reward-activity.server";
 
+const GENERIC_GIFT_CARD_MATCH_WINDOW_MS = 30 * 60 * 1000;
+
 function getOrderId(payload) {
   return String(payload?.admin_graphql_api_id || payload?.id || "");
 }
@@ -25,6 +27,17 @@ function getOrderTotal(payload) {
       payload?.subtotal_price ||
       0,
   );
+}
+
+function getOrderDate(payload) {
+  const dateValue =
+    payload?.processed_at ||
+    payload?.created_at ||
+    payload?.updated_at ||
+    payload?.closed_at;
+  const date = dateValue ? new Date(dateValue) : null;
+
+  return date && !Number.isNaN(date.getTime()) ? date : new Date();
 }
 
 function getDiscountCodes(payload) {
@@ -51,8 +64,114 @@ function getDiscountCodes(payload) {
   return Array.from(codes);
 }
 
+function normalizeGiftCardCode(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : null;
+}
+
+function getLastCharacters(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return normalized.length >= 4 ? normalized.slice(-4) : normalized || null;
+}
+
 function getCustomerName(customerData) {
   return `${customerData?.first_name || ""} ${customerData?.last_name || ""}`.trim();
+}
+
+function getGiftCardPayments(payload) {
+  const giftCards = Array.isArray(payload?.gift_cards) ? payload.gift_cards : [];
+
+  if (giftCards.length > 0) {
+    return giftCards.map((card) => ({
+      amount: Number(card?.amount || card?.presentment_amount || 0),
+      code: card?.code || card?.gift_card_code || null,
+      lastCharacters: getLastCharacters(card?.last_characters || card?.code),
+    }));
+  }
+
+  const transactions = Array.isArray(payload?.transactions)
+    ? payload.transactions
+    : [];
+
+  const giftCardTransactions = transactions.filter((transaction) => {
+    const gateway = String(transaction?.gateway || "").toLowerCase();
+    const sourceName = String(transaction?.source_name || "").toLowerCase();
+    const paymentDetails = transaction?.payment_details || {};
+    const creditCardCompany = String(
+      paymentDetails?.credit_card_company || "",
+    ).toLowerCase();
+
+    return (
+      gateway.includes("gift") ||
+      sourceName.includes("gift") ||
+      creditCardCompany.includes("gift")
+    );
+  });
+
+  if (giftCardTransactions.length > 0) {
+    return giftCardTransactions.map((transaction) => {
+      const paymentDetails = transaction?.payment_details || {};
+      return {
+        amount: Number(transaction?.amount || 0),
+        code: null,
+        lastCharacters: getLastCharacters(
+          transaction?.receipt?.gift_card_last_characters ||
+            paymentDetails?.credit_card_number,
+        ),
+      };
+    });
+  }
+
+  const paymentDetails = payload?.payment_details;
+  if (paymentDetails && typeof paymentDetails === "object") {
+    const company = String(paymentDetails.credit_card_company || "").toLowerCase();
+    if (company.includes("gift")) {
+      return [
+        {
+          amount: Number(paymentDetails.amount || 0),
+          code: null,
+          lastCharacters: getLastCharacters(paymentDetails.credit_card_number),
+        },
+      ];
+    }
+  }
+
+  const paymentGatewayNames = Array.isArray(payload?.payment_gateway_names)
+    ? payload.payment_gateway_names
+    : [];
+
+  if (
+    paymentGatewayNames.some((name) =>
+      String(name || "").toLowerCase().includes("gift"),
+    )
+  ) {
+    return [
+      {
+        amount: 0,
+        code: null,
+        lastCharacters: null,
+        genericGatewayOnly: true,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function findRecentGiftCardReward(candidateRewards, matchedIds, orderDate) {
+  return candidateRewards
+    .filter((candidate) => {
+      if (matchedIds.has(candidate.id) || !candidate.createdAt) {
+        return false;
+      }
+
+      const ageMs = orderDate.getTime() - new Date(candidate.createdAt).getTime();
+      return ageMs >= 0 && ageMs <= GENERIC_GIFT_CARD_MATCH_WINDOW_MS;
+    })
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0];
 }
 
 export async function addOrderRewardPoints(shopDomain, payload) {
@@ -295,6 +414,210 @@ export async function settleOrderRedemptions(shopDomain, payload) {
 
   return {
     status: settledRewards.length > 0 ? "settled" : "skipped",
+    settled: settledRewards.length,
+    rewards: settledRewards,
+  };
+}
+
+export async function settleGiftCardRedemptions(shopDomain, payload) {
+  const orderId = getOrderId(payload);
+  const orderName = getOrderName(payload);
+  const orderDate = getOrderDate(payload);
+  const customerData = payload?.customer;
+  const giftCardPayments = getGiftCardPayments(payload);
+
+  if (giftCardPayments.length === 0) {
+    return {
+      status: "skipped",
+      message: "No gift card payment detected",
+      settled: 0,
+    };
+  }
+
+  if (!customerData?.id) {
+    return {
+      status: "skipped",
+      message: "No customer found",
+      settled: 0,
+    };
+  }
+
+  const shop = await prisma.shop.findUnique({
+    where: {
+      shopDomain,
+    },
+  });
+
+  if (!shop) {
+    return {
+      status: "skipped",
+      message: "Shop not found",
+      settled: 0,
+    };
+  }
+
+  const customer = await prisma.customer.findFirst({
+    where: {
+      shopId: shop.id,
+      shopifyCustomerId: String(customerData.id),
+    },
+  });
+
+  if (!customer) {
+    return {
+      status: "skipped",
+      message: "Customer not found",
+      settled: 0,
+    };
+  }
+
+  const candidateRewards = await prisma.reward.findMany({
+    where: {
+      customerId: customer.id,
+      rewardType: "gift_card",
+      orderId: null,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  if (candidateRewards.length === 0) {
+    return {
+      status: "skipped",
+      message: "No active gift card rewards found",
+      settled: 0,
+    };
+  }
+
+  const matchedRewards = [];
+  const matchedIds = new Set();
+
+  for (const payment of giftCardPayments) {
+    const amount = Number(payment.amount || 0);
+    const code = normalizeGiftCardCode(payment.code);
+    const lastCharacters =
+      typeof payment.lastCharacters === "string"
+        ? getLastCharacters(payment.lastCharacters)
+        : null;
+
+    let reward = null;
+
+    if (code) {
+      reward = candidateRewards.find(
+        (candidate) =>
+          !matchedIds.has(candidate.id) &&
+          normalizeGiftCardCode(candidate.rewardCode) === code,
+      );
+    }
+
+    if (!reward && lastCharacters) {
+      reward = candidateRewards.find((candidate) => {
+        if (matchedIds.has(candidate.id)) {
+          return false;
+        }
+
+        const candidateLastCharacters = getLastCharacters(candidate.rewardCode);
+        return candidateLastCharacters === lastCharacters;
+      });
+    }
+
+    if (!reward && amount > 0) {
+      reward = candidateRewards.find((candidate) => {
+        if (matchedIds.has(candidate.id)) {
+          return false;
+        }
+
+        const candidateAmount = Number(candidate.discountAmount || 0);
+        return Math.abs(candidateAmount - amount) < 0.01;
+      });
+    }
+
+    if (!reward && payment.genericGatewayOnly) {
+      reward = findRecentGiftCardReward(candidateRewards, matchedIds, orderDate);
+    }
+
+    if (!reward && candidateRewards.length - matchedIds.size === 1) {
+      reward = candidateRewards.find((candidate) => !matchedIds.has(candidate.id));
+    }
+
+    if (!reward) {
+      break;
+    }
+
+    matchedIds.add(reward.id);
+    matchedRewards.push(reward);
+  }
+
+  if (matchedRewards.length === 0) {
+    return {
+      status: "skipped",
+      message: "Gift card payment detected but no matching reward found",
+      settled: 0,
+    };
+  }
+
+  const settledRewards = [];
+
+  for (const reward of matchedRewards) {
+    const appliedAt = new Date();
+
+    try {
+      const updatedReward = await prisma.$transaction(async (tx) => {
+        const appliedReward = await tx.reward.update({
+          where: {
+            id: reward.id,
+          },
+          data: {
+            orderId,
+            appliedAt,
+          },
+        });
+
+        await createRewardActivityLog(tx, {
+          customerId: reward.customerId,
+          rewardId: reward.id,
+          rewardCode: reward.rewardCode,
+          activityType: REWARD_ACTIVITY_TYPES.GIFT_CARD_APPLIED,
+          message: "Gift card applied to a paid order.",
+          metadata: {
+            orderId,
+            orderName,
+            amount: reward.discountAmount,
+            appliedAt: appliedAt.toISOString(),
+          },
+        });
+
+        return appliedReward;
+      });
+
+      settledRewards.push(updatedReward);
+    } catch (error) {
+      console.error(
+        `[settleGiftCardRedemptions] Error applying gift card ${reward.rewardCode}`,
+        error,
+      );
+
+      await tryCreateRewardActivityLog({
+        customerId: reward.customerId,
+        rewardId: reward.id,
+        rewardCode: reward.rewardCode,
+        activityType: REWARD_ACTIVITY_TYPES.GIFT_CARD_FAILED,
+        message: error?.message || "Could not apply gift card redemption.",
+        metadata: {
+          orderId,
+          orderName,
+          amount: reward.discountAmount,
+          error: error?.message,
+        },
+      });
+
+      throw error;
+    }
+  }
+
+  return {
+    status: "settled",
     settled: settledRewards.length,
     rewards: settledRewards,
   };

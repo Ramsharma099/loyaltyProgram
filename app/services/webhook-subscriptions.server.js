@@ -1,3 +1,5 @@
+import { runShopifyGraphql } from "./errors.server";
+
 const ORDER_WEBHOOKS = [
   {
     topic: "ORDERS_CREATE",
@@ -42,17 +44,10 @@ function normalizeWebhookOrigin(origin) {
 }
 
 async function runGraphql(admin, query, variables = {}) {
-  const response = await admin.graphql(query, {
+  return runShopifyGraphql(admin, query, {
     variables,
+    operation: "Manage Shopify webhook subscriptions",
   });
-
-  const result = await response.json();
-
-  if (result.errors?.length) {
-    throw new Error(JSON.stringify(result.errors));
-  }
-
-  return result.data;
 }
 
 export async function ensureOrderWebhookSubscriptions(admin, origin) {
@@ -84,7 +79,7 @@ export async function ensureOrderWebhookSubscriptions(admin, origin) {
     `,
   );
 
-  const subscriptions = data.webhookSubscriptions.edges.map(({ node }) => ({
+  const subscriptions = (data.webhookSubscriptions?.edges || []).map(({ node }) => ({
     id: node.id,
     topic: node.topic,
     callbackUrl: getHttpCallbackUrl(node.endpoint),

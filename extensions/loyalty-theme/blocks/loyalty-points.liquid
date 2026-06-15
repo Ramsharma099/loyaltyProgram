@@ -8,7 +8,7 @@
 %}
 
 <div
-  class="loyalty-points-widget"
+  class="loyalty-points-widget loyalty-points-widget--{{ block.settings.display_mode }}"
   style="--loyalty-accent-color: {{ accent_color }};"
   data-loyalty-points-widget
   data-api-base-url="{{ block.settings.api_base_url | escape }}"
@@ -23,8 +23,33 @@
   data-rewards-heading="{{ block.settings.rewards_heading | escape }}"
   data-no-rewards-message="{{ block.settings.no_rewards_message | escape }}"
   data-show-rewards="{{ block.settings.show_rewards }}"
+  data-display-mode="{{ block.settings.display_mode }}"
 >
-  <div class="loyalty-points-widget__inner">
+  {% if block.settings.display_mode == 'floating' %}
+    <button
+      class="loyalty-points-widget__launcher"
+      type="button"
+      aria-expanded="false"
+      aria-controls="loyalty-panel-{{ block.id }}"
+      data-loyalty-toggle
+    >
+      <span class="loyalty-points-widget__launcher-icon" aria-hidden="true">★</span>
+      <span>{{ block.settings.launcher_label }}</span>
+    </button>
+  {% endif %}
+
+  <div
+    id="loyalty-panel-{{ block.id }}"
+    class="loyalty-points-widget__inner"
+    {% if block.settings.display_mode == 'floating' %}hidden{% endif %}
+    data-loyalty-panel
+  >
+    {% if block.settings.display_mode == 'floating' %}
+      <div class="loyalty-points-widget__panel-top">
+        <span class="loyalty-points-widget__brand-icon" aria-hidden="true">★</span>
+        <button class="loyalty-points-widget__close" type="button" aria-label="Close rewards" data-loyalty-close>×</button>
+      </div>
+    {% endif %}
     <div class="loyalty-points-widget__header">
       <p class="loyalty-points-widget__eyebrow">{{ block.settings.eyebrow }}</p>
       <h2 class="loyalty-points-widget__title">{{ block.settings.heading }}</h2>
@@ -34,15 +59,62 @@
       <p class="loyalty-points-widget__message" data-loyalty-status>
         {{ block.settings.loading_message }}
       </p>
-      <div class="loyalty-points-widget__balance" data-loyalty-balance hidden></div>
-      <div class="loyalty-points-widget__rewards" data-loyalty-rewards hidden></div>
+      <div class="loyalty-points-widget__balance" data-loyalty-balance>
+        <span class="loyalty-points-widget__balance-label">Available points</span>
+        <strong class="loyalty-points-widget__balance-value" data-loyalty-balance-value>--</strong>
+      </div>
+      <div class="loyalty-points-widget__actions">
+        <button class="loyalty-points-widget__action-link loyalty-points-widget__action-link--rewards" type="button" data-loyalty-view-target="available"><span aria-hidden="true">★</span><span><strong>Your Available rewards</strong><small data-loyalty-available-count>No rewards available</small></span><span aria-hidden="true">›</span></button>
+        <button class="loyalty-points-widget__action-link" type="button" data-loyalty-view-target="earn"><span aria-hidden="true">＋</span><strong>Ways to earn</strong><span aria-hidden="true">›</span></button>
+        <button class="loyalty-points-widget__action-link" type="button" data-loyalty-view-target="redeem"><span aria-hidden="true">◇</span><strong>Ways to redeem</strong><span aria-hidden="true">›</span></button>
+      </div>
+      <section class="loyalty-points-widget__view" data-loyalty-view="available" hidden>
+        <div class="loyalty-points-widget__view-header">
+          <button class="loyalty-points-widget__back" type="button" aria-label="Back to rewards overview" data-loyalty-view-target="overview">‹</button>
+          <div><strong><span data-loyalty-view-points>--</span> points</strong><small>Your Available rewards</small></div>
+          <button class="loyalty-points-widget__view-close" type="button" aria-label="Close rewards" data-loyalty-close>×</button>
+        </div>
+        <div class="loyalty-points-widget__view-content">
+          <h3>Your Available rewards</h3>
+          <div class="loyalty-points-widget__rewards" data-loyalty-rewards></div>
+        </div>
+      </section>
+      <section class="loyalty-points-widget__view" data-loyalty-view="earn" hidden>
+        <div class="loyalty-points-widget__view-header">
+          <button class="loyalty-points-widget__back" type="button" aria-label="Back to rewards overview" data-loyalty-view-target="overview">‹</button>
+          <div><strong><span data-loyalty-view-points>--</span> points</strong><small>Ways to earn</small></div>
+          <button class="loyalty-points-widget__view-close" type="button" aria-label="Close rewards" data-loyalty-close>×</button>
+        </div>
+        <div class="loyalty-points-widget__view-content">
+          <h3>Ways to earn</h3>
+          <div class="loyalty-points-widget__method-list">
+            <div class="loyalty-points-widget__method"><span aria-hidden="true">＋</span><div><strong>Join our rewards program</strong><p>Start earning points as soon as you join.</p></div></div>
+            <div class="loyalty-points-widget__method"><span aria-hidden="true">▣</span><div><strong>Place an order</strong><p>Earn points every time you shop with us.</p></div></div>
+            <div class="loyalty-points-widget__method"><span aria-hidden="true">★</span><div><strong>Keep shopping</strong><p>Save your points and unlock more valuable rewards.</p></div></div>
+          </div>
+        </div>
+      </section>
+      <section class="loyalty-points-widget__view" data-loyalty-view="redeem" hidden>
+        <div class="loyalty-points-widget__view-header">
+          <button class="loyalty-points-widget__back" type="button" aria-label="Back to rewards overview" data-loyalty-view-target="overview">‹</button>
+          <div><strong><span data-loyalty-view-points>--</span> points</strong><small>Ways to redeem</small></div>
+          <button class="loyalty-points-widget__view-close" type="button" aria-label="Close rewards" data-loyalty-close>×</button>
+        </div>
+        <div class="loyalty-points-widget__view-content">
+          <h3>Ways to redeem</h3>
+          <div data-loyalty-all-rewards></div>
+        </div>
+      </section>
     {% else %}
       <p class="loyalty-points-widget__message">{{ block.settings.logged_out_message }}</p>
-      {% if block.settings.login_link_label != blank %}
-        <a class="loyalty-points-widget__link" href="{{ routes.account_login_url }}">
-          {{ block.settings.login_link_label }}
-        </a>
-      {% endif %}
+      <div class="loyalty-points-widget__guest-actions">
+        <a class="loyalty-points-widget__button loyalty-points-widget__button--primary" href="{{ routes.account_register_url }}">Join</a>
+        <a class="loyalty-points-widget__button" href="{{ routes.account_login_url }}">{{ block.settings.login_link_label }}</a>
+      </div>
+      <div class="loyalty-points-widget__actions">
+        <a class="loyalty-points-widget__action-link" href="{{ routes.account_register_url }}"><span aria-hidden="true">＋</span><strong>Earn points</strong><span aria-hidden="true">›</span></a>
+        <a class="loyalty-points-widget__action-link" href="{{ routes.account_login_url }}"><span aria-hidden="true">◇</span><strong>Redeem points</strong><span aria-hidden="true">›</span></a>
+      </div>
     {% endif %}
   </div>
 </div>
@@ -54,6 +126,22 @@
   "stylesheet": "loyalty-points.css",
   "javascript": "loyalty-points.js",
   "settings": [
+    {
+      "type": "select",
+      "id": "display_mode",
+      "label": "Display mode",
+      "default": "floating",
+      "options": [
+        { "value": "floating", "label": "Floating button" },
+        { "value": "inline", "label": "Inline block" }
+      ]
+    },
+    {
+      "type": "text",
+      "id": "launcher_label",
+      "label": "Floating button label",
+      "default": "Rewards"
+    },
     {
       "type": "text",
       "id": "api_base_url",
@@ -125,7 +213,7 @@
       "type": "color",
       "id": "accent_color",
       "label": "Accent color",
-      "default": "#111827"
+      "default": "#008060"
     }
   ]
 }
