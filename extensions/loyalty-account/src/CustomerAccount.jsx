@@ -6,8 +6,10 @@ import {
 import { render } from "preact";
 import { useEffect, useRef, useState, useCallback } from "preact/hooks";
 import { fetchApiJson } from "./api";
+import { API_BASE_URL } from "./api-base-url.generated";
 
 const HISTORY_PAGE_SIZE = 8;
+const APP_PROXY_PATH = "/apps/loyalty-points";
 
 const ACTIVITY_APPEARANCE = {
   discount_created: { icon: "info", tone: "info" },
@@ -74,6 +76,106 @@ function normalizeStoreCreditReward(reward) {
   };
 }
 
+function normalizeApiBaseUrl(value) {
+  return typeof value === "string" ? value.trim().replace(/\/$/, "") : "";
+}
+
+function normalizeShopDomain(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return "";
+  }
+
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return value.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  }
+}
+
+function decodeJwtPayload(token) {
+  try {
+    const payload = token.split(".")[1];
+    const normalizedPayload = payload
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(Math.ceil(payload.length / 4) * 4, "=");
+
+    return JSON.parse(globalThis.atob(normalizedPayload));
+  } catch {
+    return null;
+  }
+}
+
+function getShopDomainFromSessionToken(token) {
+  const payload = decodeJwtPayload(token);
+
+  return normalizeShopDomain(payload?.dest || payload?.shop || payload?.iss);
+}
+
+async function getShopDomainFromStorefrontApi() {
+  const response = await shopify.query(`
+    query LoyaltyShopDomain {
+      shop {
+        primaryDomain {
+          url
+        }
+      }
+    }
+  `);
+
+  return normalizeShopDomain(response?.data?.shop?.primaryDomain?.url);
+}
+
+function isAppProxyBaseUrl(value) {
+  try {
+    return new URL(value).pathname.replace(/\/$/, "") === APP_PROXY_PATH;
+  } catch {
+    return false;
+  }
+}
+
+function isDevTunnelUrl(value) {
+  try {
+    return new URL(value).hostname.endsWith(".trycloudflare.com");
+  } catch {
+    return false;
+  }
+}
+
+function getApiBaseUrls(settings) {
+  const configuredUrl = normalizeApiBaseUrl(settings?.api_base_url);
+  const generatedUrl = normalizeApiBaseUrl(API_BASE_URL);
+  const urls = [];
+
+  if (generatedUrl) {
+    urls.push(generatedUrl);
+  }
+
+  if (
+    configuredUrl &&
+    !isAppProxyBaseUrl(configuredUrl) &&
+    !isDevTunnelUrl(configuredUrl)
+  ) {
+    urls.push(configuredUrl);
+  }
+
+  return [...new Set(urls)];
+}
+
+function buildApiUrl(apiBaseUrl, endpoint, params) {
+  const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  const path =
+    isAppProxyBaseUrl(baseUrl) && endpoint === "loyalty-balance"
+      ? baseUrl
+      : `${baseUrl}/api/${endpoint}`;
+
+  return params ? `${path}?${params}` : path;
+}
+
+function buildApiUrls(apiBaseUrls, endpoint, params) {
+  return apiBaseUrls.map((apiBaseUrl) => buildApiUrl(apiBaseUrl, endpoint, params));
+}
+
 export function renderLoyaltyAccountExtension() {
   render(<CustomerAccountLoyaltyPoints />, document.body);
 }
@@ -85,9 +187,10 @@ export default function extension() {
 function CustomerAccountLoyaltyPoints() {
   const settings = useSettings();
   const customer = useAuthenticatedAccountCustomer();
-  const apiBaseUrl =
-    settings?.api_base_url ||
-    "https://cindy-bill-tan-roger.trycloudflare.com";
+  const [proxyShopDomain, setProxyShopDomain] = useState("");
+  const [isResolvingProxyBaseUrl, setIsResolvingProxyBaseUrl] = useState(true);
+  const apiBaseUrls = getApiBaseUrls(settings);
+  const apiBaseUrlsKey = apiBaseUrls.join("|");
 
   const [points, setPoints] = useState(0);
   const [customerId, setCustomerId] = useState(null);
@@ -169,7 +272,40 @@ function CustomerAccountLoyaltyPoints() {
   );
 
   useEffect(() => {
-    if (!apiBaseUrl) {
+    let isCurrent = true;
+
+    async function loadProxyBaseUrl() {
+      try {
+        const token = await shopify.sessionToken.get();
+        const shopDomain =
+          getShopDomainFromSessionToken(token) ||
+          (await getShopDomainFromStorefrontApi());
+
+        if (isCurrent) {
+          setProxyShopDomain(shopDomain);
+        }
+      } catch (error) {
+        console.error("Could not resolve account app proxy URL", error);
+      } finally {
+        if (isCurrent) {
+          setIsResolvingProxyBaseUrl(false);
+        }
+      }
+    }
+
+    loadProxyBaseUrl();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isResolvingProxyBaseUrl) {
+      return;
+    }
+
+    if (apiBaseUrls.length === 0) {
       setIsLoading(false);
       setPoints(0);
       setCustomerId(null);
@@ -202,10 +338,11 @@ function CustomerAccountLoyaltyPoints() {
       try {
         const params = new URLSearchParams({
           customerId: customer.id,
+          shop: proxyShopDomain,
         });
 
         const data = await fetchApiJson(
-          `${apiBaseUrl}/api/loyalty-balance?${params}`,
+          buildApiUrls(apiBaseUrls, "loyalty-balance", params),
           undefined,
           "Could not load points. Please try again.",
         );
@@ -252,18 +389,29 @@ function CustomerAccountLoyaltyPoints() {
     return () => {
       isCurrent = false;
     };
-  }, [apiBaseUrl, customer?.id, configErrorMsg, loginMessage]);
+  }, [
+    apiBaseUrlsKey,
+    customer?.id,
+    configErrorMsg,
+    isResolvingProxyBaseUrl,
+    loginMessage,
+    proxyShopDomain,
+  ]);
 
   const fetchHistory = useCallback(async () => {
-    if (!apiBaseUrl || !customer?.id) return;
+    if (isResolvingProxyBaseUrl || !customer?.id) return;
+    if (apiBaseUrls.length === 0) return;
 
     let isCurrent = true;
     setIsLoadingHistory(true);
 
     try {
-      const params = new URLSearchParams({ customerId: customer.id });
+      const params = new URLSearchParams({
+        customerId: customer.id,
+        shop: proxyShopDomain,
+      });
       const data = await fetchApiJson(
-        `${apiBaseUrl}/api/customer-reward-history?${params}`,
+        buildApiUrls(apiBaseUrls, "customer-reward-history", params),
         undefined,
         "Could not load reward history. Please try again.",
       );
@@ -287,7 +435,7 @@ function CustomerAccountLoyaltyPoints() {
     return () => {
       isCurrent = false;
     };
-  }, [apiBaseUrl, customer?.id]);
+  }, [apiBaseUrlsKey, customer?.id, isResolvingProxyBaseUrl, proxyShopDomain]);
 
   useEffect(() => {
     fetchHistory();
@@ -340,7 +488,7 @@ function CustomerAccountLoyaltyPoints() {
 
     try {
       const data = await fetchApiJson(
-        `${apiBaseUrl}/api/redeem-points`,
+        buildApiUrls(apiBaseUrls, "redeem-points"),
         {
           method: "POST",
           headers: {
@@ -348,6 +496,7 @@ function CustomerAccountLoyaltyPoints() {
           },
           body: JSON.stringify({
             customerId,
+            shop: proxyShopDomain,
             pointsToRedeem,
             rewardType: "store_credit",
           }),
@@ -625,11 +774,11 @@ function CustomerAccountLoyaltyPoints() {
           {/* Activity */}
           <s-grid-item>
             <s-stack direction="inline" gap="tight" alignItems="center">
-              <s-icon
+              {/* <s-icon
                 type={activityAppearance.icon}
                 tone={activityAppearance.tone}
                 size="small"
-              />
+              /> */}
               <s-badge
                 tone={activityAppearance.tone === "critical" ? "critical" : "neutral"}
               >
@@ -641,11 +790,11 @@ function CustomerAccountLoyaltyPoints() {
           {/* Type */}
           <s-grid-item>
             <s-stack direction="inline" gap="tight" alignItems="center">
-              <s-icon
+              {/* <s-icon
                 type={rewardTypeBadge.icon}
                 tone={rewardTypeBadge.tone}
                 size="small"
-              />
+              /> */}
               <s-badge color="subdued">{rewardTypeBadge.label}</s-badge>
             </s-stack>
           </s-grid-item>

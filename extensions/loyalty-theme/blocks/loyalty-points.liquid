@@ -11,7 +11,7 @@
   class="loyalty-points-widget loyalty-points-widget--{{ block.settings.display_mode }}"
   style="--loyalty-accent-color: {{ accent_color }};"
   data-loyalty-points-widget
-  data-api-base-url="{{ block.settings.api_base_url | escape }}"
+  data-api-base-url="/apps/loyalty-points"
   data-balance-url="/apps/loyalty-points"
   data-shop-domain="{{ shop.permanent_domain | escape }}"
   data-customer-id="{{ customer_id }}"
@@ -142,13 +142,6 @@
       "id": "launcher_label",
       "label": "Floating button label",
       "default": "Rewards"
-    },
-    {
-      "type": "text",
-      "id": "api_base_url",
-      "label": "API base URL",
-      "default": "https://adequate-wiley-picks-pcs.trycloudflare.com",
-      "info": "HTTPS URL for the app backend."
     },
     {
       "type": "text",

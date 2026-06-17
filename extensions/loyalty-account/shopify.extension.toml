@@ -27,8 +27,8 @@ network_access = true
 [[extensions.settings.fields]]
 key = "api_base_url"
 type = "single_line_text_field"
-name = "API base URL"
-description = "HTTPS URL of the app backend, for example the Shopify CLI tunnel URL."
+name = "Production API base URL"
+description = "Production app URL. During shopify app dev, the current tunnel URL is used automatically."
 
 [[extensions.settings.fields]]
 key = "accountLoginMessage"
@@ -138,8 +138,8 @@ network_access = true
 [[extensions.settings.fields]]
 key = "api_base_url"
 type = "single_line_text_field"
-name = "API base URL"
-description = "HTTPS URL of the app backend, for example the Shopify CLI tunnel URL."
+name = "Production API base URL"
+description = "Production app URL. During shopify app dev, the current tunnel URL is used automatically."
 
 [[extensions.settings.fields]]
 key = "accountLoginMessage"

@@ -4,7 +4,7 @@ import { logError } from "../services/errors.server";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
 };
 
 function json(data, init = {}) {
@@ -78,6 +78,13 @@ function getActivityIcon(activityType) {
 }
 
 export const loader = async ({ request }) => {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: CORS_HEADERS,
+    });
+  }
+
   try {
     const url = new URL(request.url);
     const customerId = url.searchParams.get("customerId");

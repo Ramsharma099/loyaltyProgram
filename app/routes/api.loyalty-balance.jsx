@@ -26,7 +26,7 @@ import {
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
 };
 
 const checkedWebhookSubscriptions = new Set();
@@ -436,6 +436,13 @@ async function ensureWebhooksFromPublicRequest(shopDomain, origin) {
 }
 
 export const loader = async ({ request }) => {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: CORS_HEADERS,
+    });
+  }
+
   try {
     const url = new URL(request.url);
     const shop = url.searchParams.get("shop");

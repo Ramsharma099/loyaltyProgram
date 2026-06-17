@@ -2,6 +2,7 @@ import "@shopify/ui-extensions/preact";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { fetchApiJson } from "./api";
+import { API_BASE_URL } from "./api-base-url.generated";
 
 const DEFAULT_REWARD_OPTIONS = [
   {
@@ -29,6 +30,7 @@ const DEFAULT_REWARD_OPTIONS = [
 ];
 
 const REWARD_TYPE_PREFERENCES = ["gift_card", "discount", "both"];
+const APP_PROXY_PATH = "/apps/loyalty-points";
 
 function getSettingValue(settings, key, fallback) {
   const value = settings?.[key];
@@ -151,6 +153,60 @@ function normalizeRewardOptions(value) {
   return rewards.length > 0 ? rewards : DEFAULT_REWARD_OPTIONS;
 }
 
+function normalizeApiBaseUrl(value) {
+  return typeof value === "string" ? value.trim().replace(/\/$/, "") : "";
+}
+
+function isAppProxyBaseUrl(value) {
+  try {
+    return new URL(value).pathname.replace(/\/$/, "") === APP_PROXY_PATH;
+  } catch {
+    return false;
+  }
+}
+
+function isDevTunnelUrl(value) {
+  try {
+    return new URL(value).hostname.endsWith(".trycloudflare.com");
+  } catch {
+    return false;
+  }
+}
+
+function getApiBaseUrls(settings) {
+  const configuredUrl = normalizeApiBaseUrl(settings?.api_base_url);
+  const generatedUrl = normalizeApiBaseUrl(API_BASE_URL);
+  const urls = [];
+
+  if (generatedUrl) {
+    urls.push(generatedUrl);
+  }
+
+  if (
+    configuredUrl &&
+    !isAppProxyBaseUrl(configuredUrl) &&
+    !isDevTunnelUrl(configuredUrl)
+  ) {
+    urls.push(configuredUrl);
+  }
+
+  return [...new Set(urls)];
+}
+
+function buildApiUrl(apiBaseUrl, endpoint, params) {
+  const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  const path =
+    isAppProxyBaseUrl(baseUrl) && endpoint === "loyalty-balance"
+      ? baseUrl
+      : `${baseUrl}/api/${endpoint}`;
+
+  return params ? `${path}?${params}` : path;
+}
+
+function buildApiUrls(apiBaseUrls, endpoint, params) {
+  return apiBaseUrls.map((apiBaseUrl) => buildApiUrl(apiBaseUrl, endpoint, params));
+}
+
 export default function extension() {
   render(<Extension />, document.body);
 }
@@ -158,9 +214,8 @@ export default function extension() {
 function Extension() {
   const [settings, setSettings] = useState(shopify.settings.current);
 
-  const apiBaseUrl =
-    settings?.api_base_url ||
-    "https://cindy-bill-tan-roger.trycloudflare.com";
+  const apiBaseUrls = getApiBaseUrls(settings);
+  const apiBaseUrlsKey = apiBaseUrls.join("|");
 
   const [checkoutCustomer, setCheckoutCustomer] = useState(
     shopify.buyerIdentity.customer.current,
@@ -263,7 +318,7 @@ function Extension() {
   }, []);
 
   useEffect(() => {
-    if (!apiBaseUrl) {
+    if (apiBaseUrls.length === 0) {
       setIsLoading(false);
       setCustomerId(null);
       setPoints(0);
@@ -300,7 +355,7 @@ function Extension() {
         });
 
         const data = await fetchApiJson(
-          `${apiBaseUrl}/api/loyalty-balance?${params}`,
+          buildApiUrls(apiBaseUrls, "loyalty-balance", params),
           undefined,
           "Could not load points. Please try again.",
         );
@@ -342,7 +397,7 @@ function Extension() {
     return () => {
       isCurrent = false;
     };
-  }, [apiBaseUrl, checkoutCustomer?.id, loginMessage]);
+  }, [apiBaseUrlsKey, checkoutCustomer?.id, loginMessage]);
 
   useEffect(() => {
     if (
@@ -378,7 +433,7 @@ function Extension() {
 
     try {
       const data = await fetchApiJson(
-        `${apiBaseUrl}/api/redeem-points`,
+        buildApiUrls(apiBaseUrls, "redeem-points"),
         {
           method: "POST",
           headers: {
@@ -386,6 +441,7 @@ function Extension() {
           },
           body: JSON.stringify({
             customerId,
+            shop: shopify.shop?.myshopifyDomain || "",
             pointsToRedeem: reward.points,
             rewardType: reward.type || "discount",
           }),

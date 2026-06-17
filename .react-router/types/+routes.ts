@@ -38,6 +38,12 @@ type Pages = {
   "/api/loyalty-balance": {
     params: {};
   };
+  "/api/loyalty-balance/api/customer-reward-history": {
+    params: {};
+  };
+  "/api/loyalty-balance/api/redeem-points": {
+    params: {};
+  };
   "/api/redeem-points": {
     params: {};
   };
@@ -72,7 +78,7 @@ type Pages = {
 type RouteFiles = {
   "root.jsx": {
     id: "root";
-    page: "/" | "/api/customer-reward-history" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/create" | "/webhooks/orders/paid" | "/api/loyalty-balance" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional" | "/app/customers" | "/app/settings" | "/app/history";
+    page: "/" | "/api/customer-reward-history" | "/webhooks/app/scopes_update" | "/webhooks/customers/create" | "/webhooks/app/uninstalled" | "/webhooks/refunds/create" | "/webhooks/orders/create" | "/webhooks/orders/paid" | "/api/loyalty-balance" | "/api/loyalty-balance/api/customer-reward-history" | "/api/loyalty-balance/api/redeem-points" | "/api/redeem-points" | "/api/test-order" | "/auth/login" | "/auth/*" | "/app" | "/app/additional" | "/app/customers" | "/app/settings" | "/app/history";
   };
   "routes/api.customer-reward-history.jsx": {
     id: "routes/api.customer-reward-history";
@@ -104,7 +110,15 @@ type RouteFiles = {
   };
   "routes/api.loyalty-balance.jsx": {
     id: "routes/api.loyalty-balance";
-    page: "/api/loyalty-balance";
+    page: "/api/loyalty-balance" | "/api/loyalty-balance/api/customer-reward-history" | "/api/loyalty-balance/api/redeem-points";
+  };
+  "routes/api.loyalty-balance.api.customer-reward-history.jsx": {
+    id: "routes/api.loyalty-balance.api.customer-reward-history";
+    page: "/api/loyalty-balance/api/customer-reward-history";
+  };
+  "routes/api.loyalty-balance.api.redeem-points.jsx": {
+    id: "routes/api.loyalty-balance.api.redeem-points";
+    page: "/api/loyalty-balance/api/redeem-points";
   };
   "routes/api.redeem-points.jsx": {
     id: "routes/api.redeem-points";
@@ -162,6 +176,8 @@ type RouteModules = {
   "routes/webhooks.orders.create": typeof import("./app/routes/webhooks.orders.create.jsx");
   "routes/webhooks.orders.paid": typeof import("./app/routes/webhooks.orders.paid.jsx");
   "routes/api.loyalty-balance": typeof import("./app/routes/api.loyalty-balance.jsx");
+  "routes/api.loyalty-balance.api.customer-reward-history": typeof import("./app/routes/api.loyalty-balance.api.customer-reward-history.jsx");
+  "routes/api.loyalty-balance.api.redeem-points": typeof import("./app/routes/api.loyalty-balance.api.redeem-points.jsx");
   "routes/api.redeem-points": typeof import("./app/routes/api.redeem-points.jsx");
   "routes/api.test-order": typeof import("./app/routes/api.test-order.jsx");
   "routes/auth.login": typeof import("./app/routes/auth.login/route.jsx");
