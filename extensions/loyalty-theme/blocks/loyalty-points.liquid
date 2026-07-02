@@ -346,6 +346,29 @@
         font-weight: 700;
       }
 
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 4px 16px;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-actions .loyalty-points-widget__reward-cta {
+        margin-top: 0;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-remove {
+        margin: 0;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        color: #b42318;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.86em;
+        font-weight: 700;
+      }
+
       .loyalty-points-widget--floating .loyalty-points-widget__method-list {
         display: grid;
       }
@@ -587,6 +610,46 @@
           });
       }
 
+      function cancelFallbackReward(widget, button, pendingReward) {
+        button.disabled = true;
+        button.textContent = 'Removing...';
+
+        fetch(
+          (widget.dataset.apiBaseUrl || '/apps/loyalty-points').replace(/\/$/, '') +
+            '/api/redeem-points',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              operation: 'releasePendingReward',
+              customerId: widget.dataset.loyaltyCustomerId || widget.dataset.customerId || '',
+              shop: widget.dataset.shopDomain || '',
+              rewardCode: pendingReward.rewardCode
+            })
+          }
+        )
+          .then(function (response) {
+            if (!response.ok) throw new Error('Could not remove this reward.');
+            return response.json();
+          })
+          .then(function (data) {
+            if (!data.success) throw new Error(data.message || 'Could not remove this reward.');
+            widget.dataset.loyaltyFallbackLoaded = 'false';
+            widget.querySelector('[data-loyalty-rewards]').replaceChildren();
+            setFallbackRewardMessage(
+              widget,
+              'Reward removed. You can redeem another reward.',
+              false
+            );
+            loadWidgetBalance(widget);
+          })
+          .catch(function (error) {
+            button.disabled = false;
+            button.textContent = 'Remove reward';
+            setFallbackRewardMessage(widget, error.message, true);
+          });
+      }
+
       function renderFallbackRewards(widget, rewards, points, pendingReward) {
         var container = widget.querySelector('[data-loyalty-rewards]');
         if (!container || container.querySelector('.loyalty-points-widget__reward-list')) return;
@@ -630,6 +693,19 @@
             });
           }
           item.appendChild(content);
+          if (isApplied) {
+            var rewardActions = document.createElement('div');
+            rewardActions.className = 'loyalty-points-widget__reward-actions';
+            var removeButton = document.createElement('button');
+            removeButton.className = 'loyalty-points-widget__reward-remove';
+            removeButton.type = 'button';
+            removeButton.textContent = 'Remove reward';
+            removeButton.addEventListener('click', function () {
+              cancelFallbackReward(widget, removeButton, pendingReward);
+            });
+            rewardActions.append(state, removeButton);
+            item.appendChild(rewardActions);
+          }
           list.appendChild(item);
         });
 

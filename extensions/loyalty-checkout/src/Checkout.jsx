@@ -267,6 +267,35 @@ async function applyRewardCodeToCheckout(reward) {
   }
 }
 
+async function removeRewardCodeFromCheckout(reward) {
+  const isGiftCard = reward.rewardType === "gift_card";
+  let result;
+
+  if (isGiftCard) {
+    if (!shopify.applyGiftCardChange) {
+      throw new Error("This gift card cannot be removed from checkout.");
+    }
+
+    result = await shopify.applyGiftCardChange({
+      type: "removeGiftCard",
+      code: reward.rewardCode,
+    });
+  } else {
+    if (!shopify.applyDiscountCodeChange) {
+      throw new Error("This discount cannot be removed from checkout.");
+    }
+
+    result = await shopify.applyDiscountCodeChange({
+      type: "removeDiscountCode",
+      code: reward.rewardCode,
+    });
+  }
+
+  if (result.type === "error") {
+    throw new Error(result.message || "Could not remove this reward.");
+  }
+}
+
 export default function extension() {
   render(<Extension />, document.body);
 }
@@ -302,6 +331,7 @@ function Extension() {
   const [isLoading, setIsLoading] = useState(Boolean(checkoutCustomer));
 
   const [redeemingReward, setRedeemingReward] = useState("");
+  const [removingReward, setRemovingReward] = useState("");
   const [pendingCheckoutRedemption, setPendingCheckoutRedemption] =
     useState(null);
   const [autoAppliedRewardCode, setAutoAppliedRewardCode] = useState("");
@@ -784,6 +814,59 @@ function Extension() {
     }
   };
 
+  const removeAppliedReward = async () => {
+    const reward = pendingCheckoutRedemption;
+
+    if (!reward?.rewardCode) return;
+
+    setRemovingReward(getAppliedRewardValue(reward));
+    setMessage("");
+
+    try {
+      await removeRewardCodeFromCheckout(reward);
+      await fetchApiJson(
+        buildApiUrls(apiBaseUrls, "redeem-points"),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            operation: "releasePendingReward",
+            customerId,
+            shop: shopify.shop?.myshopifyDomain || "",
+            rewardCode: reward.rewardCode,
+          }),
+        },
+        "Could not release the loyalty reward.",
+      );
+
+      setPendingCheckoutRedemption(null);
+      setAutoAppliedRewardCode("");
+      setSelectedReward("");
+      setDiscountCodes((codes) =>
+        codes.filter(
+          (code) => code.toUpperCase() !== reward.rewardCode.toUpperCase(),
+        ),
+      );
+      setAppliedGiftCards((giftCards) =>
+        giftCards.filter((giftCard) => {
+          const lastCharacters = String(giftCard?.lastCharacters || "")
+            .trim()
+            .toUpperCase();
+
+          return (
+            !lastCharacters ||
+            !reward.rewardCode.toUpperCase().endsWith(lastCharacters)
+          );
+        }),
+      );
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || "Could not remove this reward.");
+    } finally {
+      setRemovingReward("");
+    }
+  };
+
   const checkoutRewardOptions = rewardOptions.filter((reward) => {
     const type = reward.type || "discount";
 
@@ -914,24 +997,29 @@ function Extension() {
                     </s-stack>
 
                     <s-button
-                      variant={
-                        isApplied || isSelected ? "primary" : "secondary"
-                      }
-                      loading={isRedeeming}
+                      variant={isSelected ? "primary" : "secondary"}
+                      tone={isApplied ? "critical" : "auto"}
+                      loading={isRedeeming || removingReward === rewardValue}
                       disabled={
-                        isApplied ||
-                        isPendingRewardAppliedToCheckout ||
+                        (!isApplied && isPendingRewardAppliedToCheckout) ||
                         points < reward.points ||
-                        Boolean(redeemingReward)
+                        Boolean(redeemingReward) ||
+                        Boolean(removingReward)
                       }
                       onClick={() => {
+                        if (isApplied) {
+                          removeAppliedReward();
+                          return;
+                        }
                         setSelectedReward(rewardValue);
                         setMessage("");
                         applyPoints(reward);
                       }}
                     >
                       {isApplied
-                        ? "Applied"
+                        ? removingReward === rewardValue
+                          ? "Removing..."
+                          : "Remove"
                         : isRedeeming
                           ? redeemingText
                           : redeemButtonText}

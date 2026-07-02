@@ -236,6 +236,43 @@
     );
   }
 
+  async function cancelPendingReward(widget, container, pendingReward, button) {
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "Removing...";
+
+    try {
+      const response = await fetch(
+        `${widget.dataset.apiBaseUrl.replace(/\/$/, "")}/api/redeem-points`,
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            operation: "releasePendingReward",
+            customerId:
+              widget.dataset.loyaltyCustomerId || widget.dataset.customerId,
+            shop: widget.dataset.shopDomain || "",
+            rewardCode: pendingReward.rewardCode,
+          }),
+        },
+      );
+      const data = await readJsonResponse(response, widget.dataset.errorMessage);
+
+      if (!data.success) {
+        throw new Error(data.message || widget.dataset.errorMessage);
+      }
+
+      widget.dataset.hasPendingCheckoutRedemption = "false";
+      setRewardMessage(container, "Reward removed. You can redeem another reward.", false);
+      await loadWidgetData(widget);
+    } catch (error) {
+      console.error("[loyalty-points] Could not remove reward", error);
+      button.disabled = false;
+      button.textContent = originalText;
+      setRewardMessage(container, error.message || widget.dataset.errorMessage, true);
+    }
+  }
+
   function createRewardItem(widget, container, reward, isAvailable, pendingReward) {
     const item = document.createElement("li");
     item.className = "loyalty-points-widget__reward";
@@ -262,7 +299,7 @@
       "loyalty-points-widget__reward-description",
       formatRewardDescription(reward),
     );
-    appendText(
+    const cta = appendText(
       button,
       "span",
       "loyalty-points-widget__reward-cta",
@@ -278,6 +315,19 @@
     }
 
     item.appendChild(button);
+    if (isApplied) {
+      const rewardActions = document.createElement("div");
+      rewardActions.className = "loyalty-points-widget__reward-actions";
+      const removeButton = document.createElement("button");
+      removeButton.className = "loyalty-points-widget__reward-remove";
+      removeButton.type = "button";
+      removeButton.textContent = "Remove reward";
+      removeButton.addEventListener("click", () =>
+        cancelPendingReward(widget, container, pendingReward, removeButton),
+      );
+      rewardActions.append(cta, removeButton);
+      item.appendChild(rewardActions);
+    }
     return item;
   }
 

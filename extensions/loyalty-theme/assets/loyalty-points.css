@@ -181,6 +181,29 @@
   font-weight: 700;
 }
 
+.loyalty-points-widget__reward-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.loyalty-points-widget__reward-actions .loyalty-points-widget__reward-cta {
+  margin-top: 0;
+}
+
+.loyalty-points-widget__reward-remove {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #b42318;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86em;
+  font-weight: 700;
+}
+
 .loyalty-points-widget__reward-message {
   margin: 0 0 10px;
   border-radius: 6px;
