@@ -1,0 +1,2 @@
+ALTER TABLE `LoyaltySetting`
+ADD COLUMN `checkoutRewardLimit` INTEGER NOT NULL DEFAULT 10;

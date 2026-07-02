@@ -1,8 +1,8 @@
 import "@shopify/ui-extensions/preact";
 import { render } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { fetchApiJson } from "./api";
-import { API_BASE_URL } from "./api-base-url.generated";
+import { API_BASE_URL } from "./api-base-url";
 
 const DEFAULT_REWARD_OPTIONS = [
   {
@@ -31,6 +31,8 @@ const DEFAULT_REWARD_OPTIONS = [
 
 const REWARD_TYPE_PREFERENCES = ["gift_card", "discount", "both"];
 const APP_PROXY_PATH = "/apps/loyalty-points";
+const PENDING_REDEMPTION_MESSAGE =
+  "A loyalty reward is already applied to this order.";
 
 function getSettingValue(settings, key, fallback) {
   const value = settings?.[key];
@@ -104,6 +106,32 @@ function formatRewardDescription(reward) {
 
 function getRewardValue(reward) {
   return `${reward.type || "discount"}:${reward.points}`;
+}
+
+function getAppliedRewardValue(reward) {
+  if (!reward) {
+    return "";
+  }
+
+  const rewardType = reward.rewardType || reward.type || "discount";
+  const points = Number(
+    reward.pointsUsed ?? reward.pointsToRedeem ?? reward.points,
+  );
+
+  return Number.isInteger(points) && points > 0 ? `${rewardType}:${points}` : "";
+}
+
+function normalizeDiscountCodes(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) =>
+      typeof item === "string" ? item : item?.code || item?.discountCode,
+    )
+    .filter(Boolean)
+    .map((code) => String(code).trim());
 }
 
 function normalizeRewardOptions(value) {
@@ -207,6 +235,38 @@ function buildApiUrls(apiBaseUrls, endpoint, params) {
   return apiBaseUrls.map((apiBaseUrl) => buildApiUrl(apiBaseUrl, endpoint, params));
 }
 
+async function applyRewardCodeToCheckout(reward) {
+  if (reward.rewardType === "gift_card") {
+    if (!shopify.applyGiftCardChange) {
+      throw new Error("Gift cards cannot be applied in this checkout.");
+    }
+
+    const result = await shopify.applyGiftCardChange({
+      type: "addGiftCard",
+      code: reward.rewardCode,
+    });
+
+    if (result.type === "error") {
+      throw new Error(result.message || "Could not apply gift card.");
+    }
+
+    return;
+  }
+
+  if (!shopify.applyDiscountCodeChange) {
+    throw new Error("Discount codes cannot be applied in this checkout.");
+  }
+
+  const result = await shopify.applyDiscountCodeChange({
+    type: "addDiscountCode",
+    code: reward.rewardCode,
+  });
+
+  if (result.type === "error") {
+    throw new Error(result.message || "Could not apply discount code.");
+  }
+}
+
 export default function extension() {
   render(<Extension />, document.body);
 }
@@ -214,8 +274,7 @@ export default function extension() {
 function Extension() {
   const [settings, setSettings] = useState(shopify.settings.current);
 
-  const apiBaseUrls = getApiBaseUrls(settings);
-  const apiBaseUrlsKey = apiBaseUrls.join("|");
+  const apiBaseUrls = useMemo(() => getApiBaseUrls(settings), [settings]);
 
   const [checkoutCustomer, setCheckoutCustomer] = useState(
     shopify.buyerIdentity.customer.current,
@@ -226,6 +285,14 @@ function Extension() {
   const [points, setPoints] = useState(0);
   const [rewardOptions, setRewardOptions] = useState(DEFAULT_REWARD_OPTIONS);
   const [rewardTypePreference, setRewardTypePreference] = useState("both");
+  const [discountCodes, setDiscountCodes] = useState(() =>
+    normalizeDiscountCodes(shopify.discountCodes?.current),
+  );
+  const [appliedGiftCards, setAppliedGiftCards] = useState(() =>
+    Array.isArray(shopify.appliedGiftCards?.current)
+      ? shopify.appliedGiftCards.current
+      : [],
+  );
 
   const [selectedReward, setSelectedReward] = useState("");
   const [isRedeemOpen, setIsRedeemOpen] = useState(Boolean(checkoutCustomer));
@@ -235,6 +302,9 @@ function Extension() {
   const [isLoading, setIsLoading] = useState(Boolean(checkoutCustomer));
 
   const [redeemingReward, setRedeemingReward] = useState("");
+  const [pendingCheckoutRedemption, setPendingCheckoutRedemption] =
+    useState(null);
+  const [autoAppliedRewardCode, setAutoAppliedRewardCode] = useState("");
 
   const [message, setMessage] = useState("");
 
@@ -308,6 +378,29 @@ function Extension() {
     "checkoutAvailableRewardsMsg",
     "{reward_count} available {reward_label}",
   );
+  const pendingRewardCode = pendingCheckoutRedemption?.rewardCode;
+  const pendingRewardType = pendingCheckoutRedemption?.rewardType;
+  const isPendingGiftCardApplied = Boolean(
+    pendingRewardCode &&
+      pendingRewardType === "gift_card" &&
+      appliedGiftCards.some((giftCard) => {
+        const lastCharacters = String(giftCard?.lastCharacters || "")
+          .trim()
+          .toUpperCase();
+
+        return (
+          lastCharacters &&
+          pendingRewardCode.toUpperCase().endsWith(lastCharacters)
+        );
+      }),
+  );
+  const isPendingRewardAppliedToCheckout = Boolean(
+    pendingRewardCode &&
+      (isPendingGiftCardApplied ||
+        discountCodes.some(
+          (code) => code.toUpperCase() === pendingRewardCode.toUpperCase(),
+        )),
+  );
 
   useEffect(() => {
     return shopify.buyerIdentity.customer.subscribe(setCheckoutCustomer);
@@ -318,6 +411,193 @@ function Extension() {
   }, []);
 
   useEffect(() => {
+    if (!shopify.discountCodes?.subscribe) {
+      return undefined;
+    }
+
+    return shopify.discountCodes.subscribe((codes) => {
+      setDiscountCodes(normalizeDiscountCodes(codes));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!shopify.appliedGiftCards?.subscribe) {
+      return undefined;
+    }
+
+    return shopify.appliedGiftCards.subscribe((giftCards) => {
+      setAppliedGiftCards(Array.isArray(giftCards) ? giftCards : []);
+    });
+  }, []);
+
+  useEffect(() => {
+    const rewardCode = pendingCheckoutRedemption?.rewardCode;
+    const rewardType = pendingCheckoutRedemption?.rewardType || "discount";
+
+    if (!rewardCode || rewardType !== "discount") {
+      return;
+    }
+
+    const isApplied = discountCodes.some(
+      (code) => code.toUpperCase() === rewardCode.toUpperCase(),
+    );
+
+    if (isApplied) {
+      if (autoAppliedRewardCode.toUpperCase() !== rewardCode.toUpperCase()) {
+        setAutoAppliedRewardCode(rewardCode);
+      }
+
+      return;
+    }
+
+    if (autoAppliedRewardCode.toUpperCase() === rewardCode.toUpperCase()) {
+      setPendingCheckoutRedemption(null);
+      setAutoAppliedRewardCode("");
+      setMessage("");
+
+      fetchApiJson(
+        buildApiUrls(apiBaseUrls, "redeem-points"),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            operation: "releasePendingReward",
+            customerId,
+            shop: shopify.shop?.myshopifyDomain || "",
+            rewardCode,
+          }),
+        },
+        "Could not cancel the loyalty reward.",
+      ).catch((error) => {
+        console.error("Could not release pending loyalty reward", error);
+        setMessage(error.message || "Could not cancel the loyalty reward.");
+      });
+
+      return;
+    }
+
+    let isCurrent = true;
+
+    async function applyPendingReward() {
+      try {
+        await applyRewardCodeToCheckout(pendingCheckoutRedemption);
+
+        if (!isCurrent) {
+          return;
+        }
+
+        setAutoAppliedRewardCode(rewardCode);
+        setDiscountCodes((codes) => [...new Set([...codes, rewardCode])]);
+        setMessage(formatSettingText(discountMsg, { rewardCode }));
+      } catch (error) {
+        console.error(error);
+
+        if (isCurrent) {
+          setMessage(error.message || errorMsg);
+        }
+      }
+    }
+
+    applyPendingReward();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [
+    autoAppliedRewardCode,
+    apiBaseUrls,
+    customerId,
+    discountCodes,
+    discountMsg,
+    errorMsg,
+    pendingCheckoutRedemption,
+  ]);
+
+  useEffect(() => {
+    const rewardCode = pendingCheckoutRedemption?.rewardCode;
+    const rewardType = pendingCheckoutRedemption?.rewardType;
+
+    if (!rewardCode || rewardType !== "gift_card") {
+      return;
+    }
+
+    if (isPendingGiftCardApplied) {
+      if (autoAppliedRewardCode.toUpperCase() !== rewardCode.toUpperCase()) {
+        setAutoAppliedRewardCode(rewardCode);
+      }
+
+      return;
+    }
+
+    if (autoAppliedRewardCode.toUpperCase() !== rewardCode.toUpperCase()) {
+      let isCurrent = true;
+
+      const applyPendingGiftCard = async () => {
+        try {
+          await applyRewardCodeToCheckout(pendingCheckoutRedemption);
+
+          if (!isCurrent) {
+            return;
+          }
+
+          setAutoAppliedRewardCode(rewardCode);
+          setAppliedGiftCards((giftCards) => [
+            ...giftCards,
+            {lastCharacters: rewardCode.slice(-4)},
+          ]);
+          setMessage(formatSettingText(giftCardMsg, {rewardCode}));
+        } catch (error) {
+          console.error(error);
+
+          if (isCurrent) {
+            setMessage(error.message || errorMsg);
+          }
+        }
+      };
+
+      applyPendingGiftCard();
+
+      return () => {
+        isCurrent = false;
+      };
+    }
+
+    setPendingCheckoutRedemption(null);
+    setAutoAppliedRewardCode("");
+    setMessage("");
+
+    fetchApiJson(
+      buildApiUrls(apiBaseUrls, "redeem-points"),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          operation: "releasePendingReward",
+          customerId,
+          shop: shopify.shop?.myshopifyDomain || "",
+          rewardCode,
+        }),
+      },
+      "Could not cancel the loyalty reward.",
+    ).catch((error) => {
+      console.error("Could not release pending loyalty reward", error);
+      setMessage(error.message || "Could not cancel the loyalty reward.");
+    });
+  }, [
+    apiBaseUrls,
+    autoAppliedRewardCode,
+    customerId,
+    errorMsg,
+    giftCardMsg,
+    isPendingGiftCardApplied,
+    pendingCheckoutRedemption,
+  ]);
+
+  useEffect(() => {
     if (apiBaseUrls.length === 0) {
       setIsLoading(false);
       setCustomerId(null);
@@ -326,6 +606,8 @@ function Extension() {
       setRewardTypePreference("both");
       setIsRedeemOpen(false);
       setIsCheckoutRedemptionEnabled(true);
+      setPendingCheckoutRedemption(null);
+      setAutoAppliedRewardCode("");
       setMessage("Loyalty API URL is not configured.");
       return;
     }
@@ -338,6 +620,8 @@ function Extension() {
       setRewardTypePreference("both");
       setIsRedeemOpen(false);
       setIsCheckoutRedemptionEnabled(true);
+      setPendingCheckoutRedemption(null);
+      setAutoAppliedRewardCode("");
       setMessage(loginMessage);
       return;
     }
@@ -352,6 +636,7 @@ function Extension() {
         const params = new URLSearchParams({
           customerId: checkoutCustomer.id,
           shop: shopify.shop?.myshopifyDomain || "",
+          surface: "checkout",
         });
 
         const data = await fetchApiJson(
@@ -372,6 +657,7 @@ function Extension() {
           normalizeRewardTypePreference(data.rewardTypePreference),
         );
         setRewardOptions(normalizeRewardOptions(data.rewardOptions));
+        setPendingCheckoutRedemption(data.pendingCheckoutRedemption || null);
         setIsCheckoutRedemptionEnabled(
           data.checkoutRedemptionEnabled !== false,
         );
@@ -397,7 +683,7 @@ function Extension() {
     return () => {
       isCurrent = false;
     };
-  }, [apiBaseUrlsKey, checkoutCustomer?.id, loginMessage]);
+  }, [apiBaseUrls, checkoutCustomer?.id, loginMessage]);
 
   useEffect(() => {
     if (
@@ -412,6 +698,16 @@ function Extension() {
     if (!isCheckoutRedemptionEnabled) {
       setMessage(disabledMsg);
       return;
+    }
+
+    if (isPendingRewardAppliedToCheckout) {
+      setMessage(PENDING_REDEMPTION_MESSAGE);
+      return;
+    }
+
+    if (pendingCheckoutRedemption && !isPendingRewardAppliedToCheckout) {
+      setPendingCheckoutRedemption(null);
+      setAutoAppliedRewardCode("");
     }
 
     const reward =
@@ -444,6 +740,7 @@ function Extension() {
             shop: shopify.shop?.myshopifyDomain || "",
             pointsToRedeem: reward.points,
             rewardType: reward.type || "discount",
+            appliedDiscountCodes: discountCodes,
           }),
         },
         errorMsg,
@@ -453,13 +750,26 @@ function Extension() {
         throw new Error(data.message || errorMsg);
       }
 
+      await applyRewardCodeToCheckout(data.reward);
+
       if (data.reward.rewardType === "gift_card") {
+        setAutoAppliedRewardCode(data.reward.rewardCode);
+        setAppliedGiftCards((giftCards) => [
+          ...giftCards,
+          {lastCharacters: data.reward.rewardCode.slice(-4)},
+        ]);
+        setPendingCheckoutRedemption(data.reward);
         setMessage(
           formatSettingText(giftCardMsg, {
             rewardCode: data.reward.rewardCode,
           }),
         );
       } else {
+        setDiscountCodes((codes) => [
+          ...new Set([...codes, data.reward.rewardCode]),
+        ]);
+        setAutoAppliedRewardCode(data.reward.rewardCode);
+        setPendingCheckoutRedemption(data.reward);
         setMessage(
           formatSettingText(discountMsg, {
             rewardCode: data.reward.rewardCode,
@@ -501,88 +811,175 @@ function Extension() {
     formatSettingText(discountPrompt, textReplacements),
     rewardLanguage,
   );
+  const appliedRewardValue = isPendingRewardAppliedToCheckout
+    ? getAppliedRewardValue(pendingCheckoutRedemption)
+    : "";
 
   if (!isCheckoutRedemptionEnabled) {
     return null;
   }
 
   return (
-    <s-box border="base" padding="large" cornerRadius="large">
+    <s-box border="base" padding="large" borderRadius="large">
       <s-stack gap="large">
         {isRedeemOpen ? (
-          <s-stack gap="base">
-            <s-text emphasis="bold">{redemptionTitle}</s-text>
+          <s-stack gap="large">
+            <s-grid
+              gridTemplateColumns="1fr auto"
+              gap="base"
+              alignItems="center"
+            >
+              <s-stack direction="inline" gap="small" alignItems="center">
+                <s-icon type="star" tone="success" />
+                <s-stack gap="none">
+                  <s-heading>{redemptionTitle}</s-heading>
+                  <s-text color="subdued">Use points on this order</s-text>
+                </s-stack>
+              </s-stack>
+              <s-badge icon="savings" color="subdued">
+                {availableRewards.length} available
+              </s-badge>
+            </s-grid>
 
-            <s-text>
-              {isLoading
-                ? loadingMsg
-                : `${pointsLabel} ${points}`}
-            </s-text>
+            <s-box background="subdued" padding="base" borderRadius="base">
+              <s-grid
+                gridTemplateColumns="1fr auto"
+                gap="base"
+                alignItems="center"
+              >
+                <s-stack gap="none">
+                  <s-text color="subdued">{pointsLabel}</s-text>
+                  <s-text type="small">Ready to redeem</s-text>
+                </s-stack>
+                <s-stack direction="inline" gap="small" alignItems="center">
+                  <s-icon type="star-filled" tone="success" />
+                  <s-text type="strong">
+                    {isLoading ? loadingMsg : `${points} points`}
+                  </s-text>
+                </s-stack>
+              </s-grid>
+            </s-box>
 
-            <s-text appearance="subdued">{description}</s-text>
-            <s-text emphasis="bold">{rewardPrompt}</s-text>
+            <s-stack gap="small">
+              <s-heading>{rewardPrompt}</s-heading>
+              <s-text color="subdued">{description}</s-text>
+            </s-stack>
 
             <s-stack gap="small">
               {checkoutRewardOptions.map((reward) => {
                 const rewardValue = getRewardValue(reward);
                 const isSelected = selectedReward === rewardValue;
                 const isRedeeming = redeemingReward === rewardValue;
+                const isApplied = appliedRewardValue === rewardValue;
+                const rewardContent = (
+                  <s-grid
+                    gridTemplateColumns="auto 1fr auto"
+                    gap="base"
+                    alignItems="center"
+                  >
+                    <s-box
+                      background="subdued"
+                      padding="small"
+                      borderRadius="max"
+                    >
+                      <s-icon
+                        type={
+                          reward.type === "gift_card"
+                            ? "gift-card"
+                            : "discount"
+                        }
+                        tone={isApplied ? "success" : "neutral"}
+                      />
+                    </s-box>
+
+                    <s-stack gap="small">
+                      <s-stack gap="none">
+                        <s-text type="strong">
+                          {formatRewardLabel(reward)}
+                        </s-text>
+                        <s-text color="subdued" type="small">
+                        {formatRewardDescription(reward)}
+                        </s-text>
+                      </s-stack>
+                      <s-stack direction="inline" gap="small">
+                        <s-badge icon="star" color="subdued" size="small">
+                          {reward.points} points
+                        </s-badge>
+                        <s-badge color="subdued" size="small">
+                          {reward.type === "gift_card"
+                            ? "Gift card"
+                            : "Discount"}
+                        </s-badge>
+                      </s-stack>
+                    </s-stack>
+
+                    <s-button
+                      variant={
+                        isApplied || isSelected ? "primary" : "secondary"
+                      }
+                      loading={isRedeeming}
+                      disabled={
+                        isApplied ||
+                        isPendingRewardAppliedToCheckout ||
+                        points < reward.points ||
+                        Boolean(redeemingReward)
+                      }
+                      onClick={() => {
+                        setSelectedReward(rewardValue);
+                        setMessage("");
+                        applyPoints(reward);
+                      }}
+                    >
+                      {isApplied
+                        ? "Applied"
+                        : isRedeeming
+                          ? redeemingText
+                          : redeemButtonText}
+                    </s-button>
+                  </s-grid>
+                );
+
+                if (isApplied) {
+                  return (
+                    <s-box
+                      key={rewardValue}
+                      background="subdued"
+                      border="large"
+                      padding="base"
+                      borderRadius="large"
+                    >
+                      {rewardContent}
+                    </s-box>
+                  );
+                }
 
                 return (
                   <s-box
                     key={rewardValue}
-                    border={isSelected ? "strong" : "base"}
+                    border={isSelected ? "large" : "base"}
                     padding="base"
+                    borderRadius="large"
                   >
-                    <s-grid
-                      gridTemplateColumns="auto 1fr auto"
-                      gap="base"
-                      alignItems="center"
-                    >
-                      <s-text emphasis="bold">
-                        {reward.type === "gift_card"
-                          ? "Gift"
-                          : rewardLanguage.badge}
-                      </s-text>
-
-                      <s-stack gap="none">
-                        <s-text>{formatRewardLabel(reward)}</s-text>
-                        <s-text appearance="subdued">
-                          {formatRewardDescription(reward)}
-                        </s-text>
-                      </s-stack>
-
-                      <s-button
-                        kind={isSelected ? "primary" : undefined}
-                        disabled={
-                          points < reward.points || Boolean(redeemingReward)
-                        }
-                        onClick={() => {
-                          setSelectedReward(rewardValue);
-                          setMessage("");
-                          applyPoints(reward);
-                        }}
-                      >
-                        {isRedeeming ? redeemingText : redeemButtonText}
-                      </s-button>
-                    </s-grid>
+                    {rewardContent}
                   </s-box>
                 );
               })}
             </s-stack>
 
-            <s-text appearance="subdued">
-              {replaceRewardWords(
-                formatSettingText(availableRewardsMsg, {
-                  reward_count: availableRewards.length,
-                  reward_label:
-                    availableRewards.length === 1
-                      ? rewardLanguage.singular
-                      : rewardLanguage.plural,
-                }),
-                rewardLanguage,
-              )}
-            </s-text>
+            {!isPendingRewardAppliedToCheckout ? (
+              <s-text color="subdued" type="small">
+                {replaceRewardWords(
+                  formatSettingText(availableRewardsMsg, {
+                    reward_count: availableRewards.length,
+                    reward_label:
+                      availableRewards.length === 1
+                        ? rewardLanguage.singular
+                        : rewardLanguage.plural,
+                  }),
+                  rewardLanguage,
+                )}
+              </s-text>
+            ) : null}
           </s-stack>
         ) : null}
 

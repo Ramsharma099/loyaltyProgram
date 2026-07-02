@@ -31,6 +31,24 @@ name = "Production API base URL"
 description = "Production app URL. During shopify app dev, the current tunnel URL is used automatically."
 
 [[extensions.settings.fields]]
+key = "accountRenderMode"
+type = "single_line_text_field"
+name = "Customer account render mode"
+description = "Use native for the built-in customer account UI, or iframe_link to show a link to the iframe wallet."
+
+[[extensions.settings.fields]]
+key = "accountIframeButtonText"
+type = "single_line_text_field"
+name = "Iframe wallet button text"
+description = "Button/link text for opening the iframe wallet from the customer account block."
+
+[[extensions.settings.fields]]
+key = "accountIframeDescription"
+type = "single_line_text_field"
+name = "Iframe wallet description"
+description = "Description shown above the iframe wallet link."
+
+[[extensions.settings.fields]]
 key = "accountLoginMessage"
 type = "single_line_text_field"
 name = "Login message"
@@ -140,6 +158,24 @@ key = "api_base_url"
 type = "single_line_text_field"
 name = "Production API base URL"
 description = "Production app URL. During shopify app dev, the current tunnel URL is used automatically."
+
+[[extensions.settings.fields]]
+key = "accountRenderMode"
+type = "single_line_text_field"
+name = "Customer account render mode"
+description = "Use native for the built-in customer account UI, or iframe_link to show a link to the iframe wallet."
+
+[[extensions.settings.fields]]
+key = "accountIframeButtonText"
+type = "single_line_text_field"
+name = "Iframe wallet button text"
+description = "Button/link text for opening the iframe wallet from the customer account page."
+
+[[extensions.settings.fields]]
+key = "accountIframeDescription"
+type = "single_line_text_field"
+name = "Iframe wallet description"
+description = "Description shown above the iframe wallet link."
 
 [[extensions.settings.fields]]
 key = "accountLoginMessage"

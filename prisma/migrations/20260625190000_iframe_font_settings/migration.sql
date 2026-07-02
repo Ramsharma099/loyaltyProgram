@@ -1,0 +1,3 @@
+ALTER TABLE `LoyaltySetting`
+ADD COLUMN `iframeFontFamily` VARCHAR(120) NOT NULL DEFAULT 'system',
+ADD COLUMN `iframeFontSize` INTEGER NOT NULL DEFAULT 14;

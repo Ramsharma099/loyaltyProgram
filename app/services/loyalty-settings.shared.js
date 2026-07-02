@@ -43,6 +43,7 @@ export const DEFAULT_LOYALTY_SETTINGS = {
   refundSpendAmount: 100,
   refundSpendPoints: 10,
   checkoutRedemptionEnabled: true,
+  checkoutRewardLimit: 10,
   preferredIntegration: "theme",
   redemptionRewards: JSON.stringify(DEFAULT_REWARD_OPTIONS),
   // Checkout UI Text Settings
@@ -76,6 +77,22 @@ export const DEFAULT_LOYALTY_SETTINGS = {
   accountGiftCardMsg: "Store credit added: ${amount}",
   accountErrorMsg: "Could not convert points to store credit",
   accountConfigErrorMsg: "Loyalty API URL is not configured.",
+  // Iframe Widget UI Settings
+  iframeEyebrow: "Rewards",
+  iframeHeading: "Your loyalty points",
+  iframeLoggedOutMessage: "Sign in to view and use your loyalty points.",
+  iframeLoginLabel: "Sign in",
+  iframePointsTemplate: "You have {points} points.",
+  iframeRewardsHeading: "Available rewards",
+  iframeNoRewardsMessage: "Keep earning points to unlock rewards.",
+  iframeRedeemButtonText: "Redeem",
+  iframeAccentColor: "#008060",
+  iframeBackgroundColor: "#ffffff",
+  iframeForegroundColor: "#202223",
+  iframeBorderColor: "#e3e5e8",
+  iframeFontFamily: "system",
+  iframeFontSize: 14,
+  iframeCustomCss: "",
 };
 
 export const REWARD_TYPE_PREFERENCES = ["gift_card", "discount", "both"];
@@ -208,7 +225,9 @@ export function filterRewardOptionsByPreference(rewards, preference) {
 
   if (normalizedPreference === "both") {
     return rewards.filter((reward) =>
-      ["discount", "gift_card"].includes(reward.type || "discount"),
+      ["discount", "gift_card", "store_credit"].includes(
+        reward.type || "discount",
+      ),
     );
   }
 
@@ -225,4 +244,22 @@ export function getRewardOptionsForPreference(value, preference) {
     getRewardOptionsWithSpecials(value),
     effectivePreference,
   );
+}
+
+export function normalizeCheckoutRewardLimit(value) {
+  const limit = Number(value);
+
+  if (!Number.isInteger(limit) || limit < 1) {
+    return DEFAULT_LOYALTY_SETTINGS.checkoutRewardLimit;
+  }
+
+  return Math.min(limit, 20);
+}
+
+export function limitCheckoutRewardOptions(rewards, limit) {
+  if (!Array.isArray(rewards)) {
+    return rewards;
+  }
+
+  return rewards.slice(0, normalizeCheckoutRewardLimit(limit));
 }

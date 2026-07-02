@@ -3,13 +3,50 @@
   if customer
     assign customer_id = customer.id
   endif
+  assign customer_email = ''
+  if customer
+    assign customer_email = customer.email
+  endif
 
   assign accent_color = block.settings.accent_color | default: '#111827'
+  assign effective_display_mode = block.settings.display_mode
 %}
 
+{% if effective_display_mode == 'floating_iframe' %}
+  {% capture loyalty_floating_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&surface=floating&accentColor={{ accent_color | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}{% endcapture %}
+  <div
+    class="loyalty-points-widget loyalty-points-widget--floating-iframe"
+    style="--loyalty-accent-color: {{ accent_color }}; position: fixed; z-index: 9999; right: 0; bottom: 0; width: min(220px, 100vw); height: 92px; margin: 0; pointer-events: none;"
+    data-loyalty-iframe-wrapper
+    data-loyalty-floating-wrapper
+    data-display-mode="floating_iframe"
+  >
+    <iframe
+      class="loyalty-points-widget__floating-iframe"
+      src="{{ loyalty_floating_iframe_src | strip | escape }}"
+      title="{{ block.settings.launcher_label | escape }}"
+      loading="lazy"
+    ></iframe>
+  </div>
+{% elsif effective_display_mode == 'iframe' %}
+  {% capture loyalty_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&accentColor={{ accent_color | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}{% endcapture %}
+  <div
+    class="loyalty-points-widget loyalty-points-widget--iframe"
+    style="--loyalty-accent-color: {{ accent_color }};"
+    data-loyalty-iframe-wrapper
+  >
+    <iframe
+      class="loyalty-points-widget__iframe"
+      src="{{ loyalty_iframe_src | strip | escape }}"
+      title="{{ block.settings.heading | escape }}"
+      loading="lazy"
+      style="height: {{ block.settings.iframe_height }}px;"
+    ></iframe>
+  </div>
+{% else %}
 <div
-  class="loyalty-points-widget loyalty-points-widget--{{ block.settings.display_mode }}"
-  style="--loyalty-accent-color: {{ accent_color }};"
+  class="loyalty-points-widget loyalty-points-widget--{{ effective_display_mode }}"
+  style="--loyalty-accent-color: {{ accent_color }};{% if effective_display_mode == 'floating' %} position: fixed !important; z-index: 2147483000 !important; right: 16px !important; bottom: 16px !important; left: auto !important; width: min(380px, calc(100vw - 32px)) !important; margin: 0 !important; transform: none !important; font-family: inherit;{% endif %}"
   data-loyalty-points-widget
   data-api-base-url="/apps/loyalty-points"
   data-balance-url="/apps/loyalty-points"
@@ -24,9 +61,308 @@
   data-rewards-heading="{{ block.settings.rewards_heading | escape }}"
   data-no-rewards-message="{{ block.settings.no_rewards_message | escape }}"
   data-show-rewards="{{ block.settings.show_rewards }}"
-  data-display-mode="{{ block.settings.display_mode }}"
+  data-display-mode="{{ effective_display_mode }}"
 >
-  {% if block.settings.display_mode == 'floating' %}
+  {% if effective_display_mode == 'floating' %}
+    <style>
+      .loyalty-points-widget--floating {
+        position: fixed;
+        z-index: 9999;
+        right: 16px;
+        bottom: 16px;
+        left: auto;
+        width: min(380px, calc(100vw - 32px));
+        margin: 0;
+        font-family: inherit;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__launcher {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 52px;
+        margin-right: 0;
+        margin-left: auto;
+        border: 0;
+        border-radius: 8px;
+        padding: 0 20px;
+        background: var(--loyalty-accent-color, #111827);
+        color: #fff;
+        box-shadow: 0 6px 20px rgba(32, 34, 35, 0.18);
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__inner {
+        max-height: min(640px, calc(100vh - 96px));
+        margin-bottom: 12px;
+        overflow-y: auto;
+        border: 1px solid rgba(32, 34, 35, 0.12);
+        border-radius: 8px;
+        padding: 20px;
+        background: #fff;
+        box-shadow: 0 12px 36px rgba(32, 34, 35, 0.22);
+      }
+
+      .loyalty-points-widget--floating [hidden] {
+        display: none !important;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__panel-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: -4px -4px 12px;
+        color: var(--loyalty-accent-color, #111827);
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__brand-icon,
+      .loyalty-points-widget--floating .loyalty-points-widget__launcher-icon {
+        font-size: 1.2em;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__close {
+        width: 34px;
+        height: 34px;
+        border: 0;
+        border-radius: 50%;
+        background: #f1f2f3;
+        color: #202223;
+        cursor: pointer;
+        font-size: 24px;
+        line-height: 1;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__header {
+        margin-bottom: 14px;
+        text-align: center;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__eyebrow {
+        margin: 0 0 4px;
+        color: var(--loyalty-accent-color, #111827);
+        font-size: 0.78em;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__title {
+        margin: 0;
+        font-size: 1.35em;
+        line-height: 1.25;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__message,
+      .loyalty-points-widget--floating .loyalty-points-widget__balance {
+        margin: 0;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__balance {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 14px;
+        border: 1px solid rgba(0, 128, 96, 0.22);
+        border-radius: 8px;
+        padding: 14px;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__balance-label {
+        color: #616a75;
+        font-size: 0.9em;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__balance-value {
+        color: var(--loyalty-accent-color, #111827);
+        font-size: 1.5em;
+        font-weight: 700;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__guest-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__button {
+        border: 1px solid var(--loyalty-accent-color, #111827);
+        border-radius: 6px;
+        padding: 11px 14px;
+        color: var(--loyalty-accent-color, #111827);
+        text-align: center;
+        text-decoration: none;
+        font-weight: 700;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__button--primary {
+        background: var(--loyalty-accent-color, #111827);
+        color: #fff;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__actions {
+        display: grid;
+        gap: 10px;
+        margin-top: 22px;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__action-link {
+        display: grid;
+        grid-template-columns: 24px 1fr 18px;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        border: 1px solid rgba(0, 128, 96, 0.22);
+        border-radius: 8px;
+        padding: 14px;
+        background: #fff;
+        color: #202223;
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+        text-decoration: none;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__action-link span {
+        color: var(--loyalty-accent-color, #111827);
+        font-size: 1.2em;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__action-link--rewards strong,
+      .loyalty-points-widget--floating .loyalty-points-widget__action-link--rewards small {
+        display: block;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__action-link--rewards small {
+        margin-top: 3px;
+        color: #616a75;
+        font-size: 0.86em;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__view {
+        margin: 0;
+        min-height: 0;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__view-header {
+        position: sticky;
+        z-index: 2;
+        top: 0;
+        display: grid;
+        grid-template-columns: 36px 1fr 36px;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 16px;
+        background: #e3e5e7;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__view-header strong,
+      .loyalty-points-widget--floating .loyalty-points-widget__view-header small {
+        display: block;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__view-header small {
+        margin-top: 2px;
+        color: #616a75;
+        font-size: 0.75em;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__back,
+      .loyalty-points-widget--floating .loyalty-points-widget__view-close {
+        width: 36px;
+        height: 36px;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        color: #202223;
+        cursor: pointer;
+        font: inherit;
+        font-size: 1.5em;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__view-content {
+        padding: 22px 0 0;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__view-content h3 {
+        margin: 0 0 14px;
+        font-size: 1.05em;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-list {
+        display: grid;
+        gap: 0;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward {
+        margin: 0;
+        border: 0;
+        border-bottom: 1px solid #e3e5e7;
+        border-radius: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward--applied {
+        background: rgba(0, 128, 96, 0.06);
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-button {
+        display: block;
+        width: 100%;
+        border: 0;
+        padding: 16px 4px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-title,
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-description {
+        margin: 0;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-title {
+        font-weight: 700;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-description {
+        margin-top: 4px;
+        color: #616a75;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__reward-cta {
+        display: block;
+        margin-top: 10px;
+        color: var(--loyalty-accent-color, #008060);
+        font-size: 0.86em;
+        font-weight: 700;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__method-list {
+        display: grid;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__method {
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        gap: 12px;
+        padding: 16px 4px;
+        border-bottom: 1px solid #e3e5e7;
+      }
+
+      .loyalty-points-widget--floating .loyalty-points-widget__method strong,
+      .loyalty-points-widget--floating .loyalty-points-widget__method p {
+        margin: 0;
+      }
+    </style>
     <button
       class="loyalty-points-widget__launcher"
       type="button"
@@ -42,10 +378,10 @@
   <div
     id="loyalty-panel-{{ block.id }}"
     class="loyalty-points-widget__inner"
-    {% if block.settings.display_mode == 'floating' %}hidden{% endif %}
+    {% if effective_display_mode == 'floating' %}hidden{% endif %}
     data-loyalty-panel
   >
-    {% if block.settings.display_mode == 'floating' %}
+    {% if effective_display_mode == 'floating' %}
       <div class="loyalty-points-widget__panel-top">
         <span class="loyalty-points-widget__brand-icon" aria-hidden="true">★</span>
         <button class="loyalty-points-widget__close" type="button" aria-label="Close rewards" data-loyalty-close>×</button>
@@ -119,6 +455,324 @@
     {% endif %}
   </div>
 </div>
+{% if effective_display_mode == 'floating' %}
+  <script>
+    (function (script) {
+      var widget = script.previousElementSibling;
+      if (!widget || !widget.matches('[data-loyalty-points-widget][data-display-mode="floating"]')) return;
+
+      widget.style.setProperty('position', 'fixed', 'important');
+      widget.style.setProperty('z-index', '2147483000', 'important');
+      widget.style.setProperty('right', '16px', 'important');
+      widget.style.setProperty('bottom', '16px', 'important');
+      widget.style.setProperty('left', 'auto', 'important');
+      widget.style.setProperty('margin', '0', 'important');
+      widget.style.setProperty('transform', 'none', 'important');
+
+      if (widget.parentElement !== document.body) {
+        widget.dataset.loyaltyBodyMounted = 'true';
+        document.body.appendChild(widget);
+      }
+    })(document.currentScript);
+  </script>
+  <script>
+    setTimeout(function () {
+      if (window.__loyaltyPointsFallbackLoaded) return;
+      window.__loyaltyPointsFallbackLoaded = true;
+
+      function applyFallbackCustomCss(css) {
+        var customCss = String(css || '').trim();
+        var style = document.getElementById('loyalty-points-widget-custom-css');
+
+        if (!customCss) {
+          if (style) style.remove();
+          return;
+        }
+
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'loyalty-points-widget-custom-css';
+          document.head.appendChild(style);
+        }
+
+        style.textContent = customCss.replace(/<\/style/gi, '<\\/style');
+      }
+
+      function setFallbackRewardMessage(widget, message, isError) {
+        var container = widget.querySelector('[data-loyalty-view="available"] .loyalty-points-widget__view-content');
+        if (!container) return;
+
+        var messageElement = container.querySelector('[data-loyalty-reward-message]');
+        if (!messageElement) {
+          messageElement = document.createElement('p');
+          messageElement.className = 'loyalty-points-widget__reward-message';
+          messageElement.dataset.loyaltyRewardMessage = '';
+          container.prepend(messageElement);
+        }
+
+        messageElement.textContent = message;
+        messageElement.classList.toggle(
+          'loyalty-points-widget__reward-message--error',
+          Boolean(isError)
+        );
+      }
+
+      function redeemFallbackReward(widget, item, button, state, reward) {
+        button.disabled = true;
+        state.textContent = 'Redeeming...';
+        setFallbackRewardMessage(widget, 'Creating your reward...', false);
+
+        fetch('/cart.js', { headers: { Accept: 'application/json' } })
+          .then(function (response) {
+            if (!response.ok) throw new Error('Could not check your cart.');
+            return response.json();
+          })
+          .then(function (cart) {
+            if (Number(cart.item_count || 0) < 1) {
+              throw new Error('Please add product to cart');
+            }
+
+            return fetch(
+              (widget.dataset.apiBaseUrl || '/apps/loyalty-points').replace(/\/$/, '') +
+                '/api/redeem-points',
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  customerId: widget.dataset.loyaltyCustomerId || widget.dataset.customerId || '',
+                  shop: widget.dataset.shopDomain || '',
+                  pointsToRedeem: Number(reward.points),
+                  rewardType: reward.type || 'discount',
+                  allowPendingRewardCheckout: true
+                })
+              }
+            );
+          })
+          .then(function (response) {
+            return response.text().then(function (text) {
+              var data;
+              try {
+                data = text ? JSON.parse(text) : null;
+              } catch (error) {
+                throw new Error('Could not redeem this reward.');
+              }
+              if (!response.ok || !data || !data.success || !data.reward) {
+                throw new Error((data && data.message) || 'Could not redeem this reward.');
+              }
+              return data;
+            });
+          })
+          .then(function () {
+            item.classList.add('loyalty-points-widget__reward--applied');
+            state.textContent = 'Created';
+            widget.querySelectorAll('[data-loyalty-rewards] .loyalty-points-widget__reward-button')
+              .forEach(function (rewardButton) {
+                rewardButton.disabled = true;
+              });
+            setFallbackRewardMessage(
+              widget,
+              'Reward created. Open checkout to use it.',
+              false
+            );
+          })
+          .catch(function (error) {
+            console.error('[loyalty-points] Fallback redemption failed', error);
+            button.disabled = false;
+            state.textContent = 'Redeem';
+            setFallbackRewardMessage(
+              widget,
+              error.message || 'Could not redeem this reward.',
+              true
+            );
+          });
+      }
+
+      function renderFallbackRewards(widget, rewards, points, pendingReward) {
+        var container = widget.querySelector('[data-loyalty-rewards]');
+        if (!container || container.querySelector('.loyalty-points-widget__reward-list')) return;
+
+        container.replaceChildren();
+        var list = document.createElement('ul');
+        list.className = 'loyalty-points-widget__reward-list';
+
+        rewards.filter(function (reward) {
+          return Number(reward.points) <= points;
+        }).forEach(function (reward) {
+          var type = reward.type || 'discount';
+          var isApplied = Boolean(
+            pendingReward &&
+            (pendingReward.rewardType || 'discount') === type &&
+            Number(pendingReward.pointsUsed) === Number(reward.points)
+          );
+          var item = document.createElement('li');
+          item.className = 'loyalty-points-widget__reward' +
+            (isApplied ? ' loyalty-points-widget__reward--applied' : '');
+          var content = document.createElement('button');
+          content.className = 'loyalty-points-widget__reward-button';
+          content.type = 'button';
+          content.disabled = Boolean(pendingReward);
+          var title = document.createElement('p');
+          title.className = 'loyalty-points-widget__reward-title';
+          title.textContent = type === 'gift_card'
+            ? (reward.title || ('$' + reward.amount + ' Gift Card'))
+            : ('Discount $' + reward.discount + ' for ' + reward.points + ' points');
+          var description = document.createElement('p');
+          description.className = 'loyalty-points-widget__reward-description';
+          description.textContent = reward.description ||
+            ('Redeem ' + reward.points + ' points for this reward.');
+          var state = document.createElement('span');
+          state.className = 'loyalty-points-widget__reward-cta';
+          state.textContent = isApplied ? 'Applied' : 'Redeem';
+          content.append(title, description, state);
+          if (!pendingReward) {
+            content.addEventListener('click', function () {
+              redeemFallbackReward(widget, item, content, state, reward);
+            });
+          }
+          item.appendChild(content);
+          list.appendChild(item);
+        });
+
+        container.appendChild(list);
+        container.hidden = false;
+      }
+
+      function setWidgetOpen(widget, open, restoreFocus) {
+        var launcher = widget.querySelector("[data-loyalty-toggle]");
+        var panel = widget.querySelector("[data-loyalty-panel]");
+        var closeButton = widget.querySelector("[data-loyalty-close]");
+
+        if (!launcher || !panel) return;
+
+        panel.hidden = !open;
+        launcher.setAttribute("aria-expanded", String(open));
+        widget.classList.toggle("loyalty-points-widget--open", open);
+
+        if (open && closeButton) closeButton.focus();
+        if (!open && restoreFocus) launcher.focus();
+      }
+
+      function loadWidgetBalance(widget) {
+        if (widget.dataset.loggedIn !== 'true' || widget.dataset.loyaltyFallbackLoaded === 'true') return;
+
+        widget.dataset.loyaltyFallbackLoaded = 'true';
+
+        var params = new URLSearchParams({
+          customerId: widget.dataset.customerId || '',
+          shop: widget.dataset.shopDomain || '',
+          surface: 'theme'
+        });
+
+        fetch((widget.dataset.balanceUrl || '/apps/loyalty-points') + '?' + params.toString(), {
+          headers: { Accept: 'application/json' }
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error('Could not load points');
+            return response.json();
+          })
+          .then(function (data) {
+            if (!data.success) throw new Error(data.message || 'Could not load points');
+
+            applyFallbackCustomCss(data.iframeCustomCss);
+
+            var points = Number(data.loyaltyPoints || 0);
+            var status = widget.querySelector('[data-loyalty-status]');
+            var balance = widget.querySelector('[data-loyalty-balance]');
+            var balanceValue = widget.querySelector('[data-loyalty-balance-value]');
+            var rewards = Array.isArray(data.rewardOptions) ? data.rewardOptions : [];
+            var availableRewards = rewards.filter(function (reward) {
+              return Number(reward.points) <= points;
+            });
+            var availableCount = widget.querySelector('[data-loyalty-available-count]');
+
+            if (status) status.hidden = true;
+            if (balance) balance.hidden = false;
+            if (balanceValue) balanceValue.textContent = points.toLocaleString();
+            if (data.customerId) {
+              widget.dataset.loyaltyCustomerId = String(data.customerId);
+            }
+            if (availableCount) {
+              availableCount.textContent = availableRewards.length === 1
+                ? 'You have 1 reward available'
+                : 'You have ' + availableRewards.length + ' rewards available';
+            }
+            widget.querySelectorAll('[data-loyalty-view-points]').forEach(function (element) {
+              element.textContent = points.toLocaleString();
+            });
+            renderFallbackRewards(
+              widget,
+              rewards,
+              points,
+              data.pendingCheckoutRedemption || null
+            );
+          })
+          .catch(function (error) {
+            console.error('[loyalty-points] Fallback balance request failed', error);
+            widget.dataset.loyaltyFallbackLoaded = 'false';
+
+            var status = widget.querySelector('[data-loyalty-status]');
+            if (status) {
+              status.hidden = false;
+              status.textContent = widget.dataset.errorMessage || 'Could not load points';
+            }
+          });
+      }
+
+      document
+        .querySelectorAll('[data-loyalty-points-widget][data-display-mode="floating"]')
+        .forEach(loadWidgetBalance);
+
+      if (window.__loyaltyPointsNativeScriptLoaded || window.__loyaltyPointsFallbackBound) return;
+      window.__loyaltyPointsFallbackBound = true;
+
+      window.__loyaltyPointsFallbackClickHandler = function (event) {
+        var toggle = event.target.closest("[data-loyalty-toggle]");
+        var closeButton = event.target.closest("[data-loyalty-close]");
+        var viewTarget = event.target.closest("[data-loyalty-view-target]");
+        var control = toggle || closeButton || viewTarget;
+
+        if (!control) return;
+
+        var widget = control.closest("[data-loyalty-points-widget]");
+        if (!widget || widget.dataset.displayMode !== "floating") return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        if (toggle) {
+          setWidgetOpen(widget, toggle.getAttribute("aria-expanded") !== "true", false);
+          return;
+        }
+
+        if (viewTarget) {
+          var target = viewTarget.dataset.loyaltyViewTarget;
+          var isOverview = target === 'overview';
+          var header = widget.querySelector('.loyalty-points-widget__header');
+          var panelTop = widget.querySelector('.loyalty-points-widget__panel-top');
+          var balance = widget.querySelector('[data-loyalty-balance]');
+          var actions = widget.querySelector('.loyalty-points-widget__actions');
+          if (header) header.hidden = !isOverview;
+          if (panelTop) panelTop.hidden = !isOverview;
+          if (balance) balance.hidden = !isOverview;
+          if (actions) actions.hidden = !isOverview;
+          widget.querySelectorAll('[data-loyalty-view]').forEach(function (view) {
+            view.hidden = view.dataset.loyaltyView !== target;
+          });
+          return;
+        }
+
+        setWidgetOpen(widget, false, true);
+      };
+
+      document.addEventListener(
+        "click",
+        window.__loyaltyPointsFallbackClickHandler,
+        true,
+      );
+    }, 250);
+  </script>
+{% endif %}
+{% endif %}
 
 {% schema %}
 {
@@ -134,8 +788,20 @@
       "default": "floating",
       "options": [
         { "value": "floating", "label": "Floating button" },
-        { "value": "inline", "label": "Inline block" }
+        { "value": "inline", "label": "Inline block" },
+        { "value": "iframe", "label": "Iframe embed" },
+        { "value": "floating_iframe", "label": "Floating iframe" }
       ]
+    },
+    {
+      "type": "range",
+      "id": "iframe_height",
+      "label": "Iframe height",
+      "min": 260,
+      "max": 900,
+      "step": 20,
+      "unit": "px",
+      "default": 520
     },
     {
       "type": "text",

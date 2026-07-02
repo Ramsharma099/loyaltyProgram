@@ -1,0 +1,101 @@
+{% liquid
+  assign customer_id = ''
+  if customer
+    assign customer_id = customer.id
+  endif
+  assign customer_email = ''
+  if customer
+    assign customer_email = customer.email
+  endif
+
+  assign accent_color = block.settings.accent_color | default: '#008060'
+%}
+
+{% capture loyalty_floating_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&surface=floating&accentColor={{ accent_color | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}{% endcapture %}
+
+<div
+  class="loyalty-points-widget loyalty-points-widget--floating-iframe"
+  style="--loyalty-accent-color: {{ accent_color }}; position: fixed; z-index: 9999; right: 0; bottom: 0; width: min(220px, 100vw); height: 92px; margin: 0; pointer-events: none;"
+  data-loyalty-iframe-wrapper
+  data-loyalty-floating-wrapper
+  data-loyalty-global-floating="true"
+  data-display-mode="floating_iframe"
+>
+  <iframe
+    class="loyalty-points-widget__floating-iframe"
+    src="{{ loyalty_floating_iframe_src | strip | escape }}"
+    title="{{ block.settings.launcher_label | escape }}"
+    loading="lazy"
+  ></iframe>
+</div>
+
+{% schema %}
+{
+  "name": "Loyalty floating launcher",
+  "target": "body",
+  "stylesheet": "loyalty-points.css",
+  "javascript": "loyalty-floating.js",
+  "settings": [
+    {
+      "type": "text",
+      "id": "launcher_label",
+      "label": "Launcher label",
+      "default": "Rewards"
+    },
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow",
+      "default": "Rewards"
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Your loyalty points"
+    },
+    {
+      "type": "text",
+      "id": "logged_out_message",
+      "label": "Logged out message",
+      "default": "Sign in to view and redeem your points."
+    },
+    {
+      "type": "text",
+      "id": "login_link_label",
+      "label": "Login link label",
+      "default": "Sign in"
+    },
+    {
+      "type": "text",
+      "id": "points_template",
+      "label": "Points text",
+      "default": "{points} points"
+    },
+    {
+      "type": "text",
+      "id": "rewards_heading",
+      "label": "Rewards heading",
+      "default": "Available rewards"
+    },
+    {
+      "type": "text",
+      "id": "no_rewards_message",
+      "label": "No rewards message",
+      "default": "Keep earning points to unlock rewards."
+    },
+    {
+      "type": "checkbox",
+      "id": "show_rewards",
+      "label": "Show available rewards",
+      "default": true
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "Accent color",
+      "default": "#008060"
+    }
+  ]
+}
+{% endschema %}

@@ -7,6 +7,7 @@ import {
   getPublicRequestOrigin,
 } from "../services/webhook-subscriptions.server";
 import { logError } from "../services/errors.server";
+import { ensurePlanAwareLoyaltySetup } from "../services/loyalty-installation.server";
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
@@ -18,6 +19,20 @@ export const loader = async ({ request }) => {
     logError("app:webhook-subscriptions", error, {
       shop: session.shop,
       origin,
+    });
+  }
+
+  try {
+    const setup = await ensurePlanAwareLoyaltySetup(session.shop, admin);
+
+    if (setup.planSyncError) {
+      logError("app:shop-plan-sync", setup.planSyncError, {
+        shop: session.shop,
+      });
+    }
+  } catch (error) {
+    logError("app:loyalty-setup", error, {
+      shop: session.shop,
     });
   }
 

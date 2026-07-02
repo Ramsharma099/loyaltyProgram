@@ -574,6 +574,28 @@ export async function settleGiftCardRedemptions(shopDomain, payload) {
           },
         });
 
+        // Deduct points from customer when gift card is applied after order payment
+        await tx.customer.update({
+          where: {
+            id: reward.customerId,
+          },
+          data: {
+            loyaltyPoints: {
+              decrement: reward.pointsUsed,
+            },
+          },
+        });
+
+        // Create point transaction record
+        await tx.pointTransaction.create({
+          data: {
+            customerId: reward.customerId,
+            points: reward.pointsUsed,
+            transactionType: "debit",
+            reason: "Gift Card Redemption",
+          },
+        });
+
         await createRewardActivityLog(tx, {
           customerId: reward.customerId,
           rewardId: reward.id,
@@ -584,6 +606,7 @@ export async function settleGiftCardRedemptions(shopDomain, payload) {
             orderId,
             orderName,
             amount: reward.discountAmount,
+            pointsUsed: reward.pointsUsed,
             appliedAt: appliedAt.toISOString(),
           },
         });

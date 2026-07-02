@@ -6,6 +6,7 @@ import {
   SPECIAL_REWARD_OPTIONS,
   getRewardTypePreferenceFromSettings,
   getRewardOptionsForPreference,
+  limitCheckoutRewardOptions,
 } from "../services/loyalty-settings.server";
 import {
   getEffectiveIntegration,
@@ -62,6 +63,7 @@ const TEXT_SETTINGS_FIELDS = [
   "accountGiftCardMsg",
   "accountErrorMsg",
   "accountConfigErrorMsg",
+  "iframeCustomCss",
 ];
 
 function getTextSettingsSelect() {
@@ -176,6 +178,7 @@ function isMissingLoyaltySettingFieldError(error) {
     error?.code === "P2022" ||
     message.includes("redemptionRewards") ||
     message.includes("checkoutRedemptionEnabled") ||
+    message.includes("checkoutRewardLimit") ||
     message.includes("preferredIntegration") ||
     message.includes("isShopifyPlus") ||
     message.includes("isPartnerDevelopment") ||
@@ -208,6 +211,38 @@ function findCustomer(shopifyCustomerId, shopDomain) {
   });
 }
 
+function getPendingCheckoutRedemption(customerId) {
+  return prisma.reward.findFirst({
+    where: {
+      customerId,
+      rewardType: {
+        in: ["discount", "gift_card"],
+      },
+      status: "pending",
+      OR: [
+        {
+          expiresAt: null,
+        },
+        {
+          expiresAt: {
+            gt: new Date(),
+          },
+        },
+      ],
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      rewardCode: true,
+      pointsUsed: true,
+      discountAmount: true,
+      rewardType: true,
+      expiresAt: true,
+    },
+  });
+}
+
 async function findCustomerWithRewards(shopifyCustomerId, shopDomain) {
   if (!hasLoyaltySettingField("redemptionRewards")) {
     return findCustomer(shopifyCustomerId, shopDomain);
@@ -218,6 +253,11 @@ async function findCustomerWithRewards(shopifyCustomerId, shopDomain) {
     ...(hasLoyaltySettingField("checkoutRedemptionEnabled")
       ? {
           checkoutRedemptionEnabled: true,
+        }
+      : {}),
+    ...(hasLoyaltySettingField("checkoutRewardLimit")
+      ? {
+          checkoutRewardLimit: true,
         }
       : {}),
     ...(hasLoyaltySettingField("preferredIntegration")
@@ -262,21 +302,50 @@ async function findCustomerWithRewards(shopifyCustomerId, shopDomain) {
   }
 }
 
-async function getShopIntegrationStatus(shopDomain) {
+function getCheckoutRewardLimit(loyaltySetting) {
+  return (
+    loyaltySetting?.checkoutRewardLimit ??
+    DEFAULT_LOYALTY_SETTINGS.checkoutRewardLimit
+  );
+}
+
+function getSurfaceRewardOptions(rewardOptions, loyaltySetting, surface) {
+  if (!["checkout", "theme"].includes(surface)) {
+    return rewardOptions;
+  }
+
+  const checkoutAndThemeRewards = rewardOptions.filter((reward) =>
+    ["discount", "gift_card"].includes(reward.type || "discount"),
+  );
+
+  return limitCheckoutRewardOptions(
+    checkoutAndThemeRewards,
+    getCheckoutRewardLimit(loyaltySetting),
+  );
+}
+
+async function getShopIntegrationStatus(shopDomain, surface) {
   if (!shopDomain || !hasLoyaltySettingField("checkoutRedemptionEnabled")) {
+    const loyaltySetting = DEFAULT_LOYALTY_SETTINGS;
+    const rewardOptions = getRewardOptionsForPreference(
+      loyaltySetting.redemptionRewards,
+    );
+
     return {
       checkoutRedemptionEnabled:
-        DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled,
+        loyaltySetting.checkoutRedemptionEnabled,
       checkoutIntegrationEnabled:
-        DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled,
-      effectiveIntegration: DEFAULT_LOYALTY_SETTINGS.preferredIntegration,
-      rewardOptions: getRewardOptionsForPreference(
-        DEFAULT_LOYALTY_SETTINGS.redemptionRewards,
+        loyaltySetting.checkoutRedemptionEnabled,
+      effectiveIntegration: loyaltySetting.preferredIntegration,
+      rewardOptions: getSurfaceRewardOptions(
+        rewardOptions,
+        loyaltySetting,
+        surface,
       ),
       rewardTypePreference: getRewardTypePreferenceFromSettings(
-        DEFAULT_LOYALTY_SETTINGS.redemptionRewards,
+        loyaltySetting.redemptionRewards,
       ),
-      loyaltySetting: DEFAULT_LOYALTY_SETTINGS,
+      loyaltySetting,
     };
   }
 
@@ -291,6 +360,11 @@ async function getShopIntegrationStatus(shopDomain) {
           select: {
             redemptionRewards: true,
             checkoutRedemptionEnabled: true,
+            ...(hasLoyaltySettingField("checkoutRewardLimit")
+              ? {
+                  checkoutRewardLimit: true,
+                }
+              : {}),
             ...(hasLoyaltySettingField("preferredIntegration")
               ? {
                   preferredIntegration: true,
@@ -302,6 +376,10 @@ async function getShopIntegrationStatus(shopDomain) {
       },
     });
 
+    const rewardOptions = getRewardOptionsForPreference(
+      shop?.loyaltySetting?.redemptionRewards,
+    );
+
     return {
       checkoutRedemptionEnabled: isRewardsRedemptionEnabled(
         shop?.loyaltySetting,
@@ -311,8 +389,10 @@ async function getShopIntegrationStatus(shopDomain) {
         shop?.loyaltySetting,
       ),
       effectiveIntegration: getEffectiveIntegration(shop, shop?.loyaltySetting),
-      rewardOptions: getRewardOptionsForPreference(
-        shop?.loyaltySetting?.redemptionRewards,
+      rewardOptions: getSurfaceRewardOptions(
+        rewardOptions,
+        shop?.loyaltySetting,
+        surface,
       ),
       rewardTypePreference: getRewardTypePreferenceFromSettings(
         shop?.loyaltySetting?.redemptionRewards,
@@ -324,41 +404,60 @@ async function getShopIntegrationStatus(shopDomain) {
       throw error;
     }
 
+    const loyaltySetting = DEFAULT_LOYALTY_SETTINGS;
+    const rewardOptions = getRewardOptionsForPreference(
+      loyaltySetting.redemptionRewards,
+    );
+
     return {
       checkoutRedemptionEnabled:
-        DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled,
+        loyaltySetting.checkoutRedemptionEnabled,
       checkoutIntegrationEnabled:
-        DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled,
-      effectiveIntegration: DEFAULT_LOYALTY_SETTINGS.preferredIntegration,
-      rewardOptions: getRewardOptionsForPreference(
-        DEFAULT_LOYALTY_SETTINGS.redemptionRewards,
+        loyaltySetting.checkoutRedemptionEnabled,
+      effectiveIntegration: loyaltySetting.preferredIntegration,
+      rewardOptions: getSurfaceRewardOptions(
+        rewardOptions,
+        loyaltySetting,
+        surface,
       ),
       rewardTypePreference: getRewardTypePreferenceFromSettings(
-        DEFAULT_LOYALTY_SETTINGS.redemptionRewards,
+        loyaltySetting.redemptionRewards,
       ),
-      loyaltySetting: DEFAULT_LOYALTY_SETTINGS,
+      loyaltySetting,
     };
   }
 }
 
-async function getLoyaltyBalance(customerId, shop) {
+async function getLoyaltyBalance(customerId, shop, surface) {
   const shopifyCustomerId = getShopifyCustomerId(customerId);
   const shopDomain = normalizeShopDomain(shop);
 
   if (!shopifyCustomerId) {
-    return json(
-      {
-        success: false,
-        message: "Customer is not available",
-      },
-      { status: 400 },
+    const integrationStatus = await getShopIntegrationStatus(
+      shopDomain,
+      surface,
     );
+    const textSettings = buildTextSettingsResponse(
+      integrationStatus.loyaltySetting,
+    );
+
+    return json({
+      success: true,
+      customerId: null,
+      loyaltyPoints: 0,
+      storeCreditReward,
+      ...integrationStatus,
+      ...textSettings,
+    });
   }
 
   const customer = await findCustomerWithRewards(shopifyCustomerId, shopDomain);
 
   if (!customer) {
-    const integrationStatus = await getShopIntegrationStatus(shopDomain);
+    const integrationStatus = await getShopIntegrationStatus(
+      shopDomain,
+      surface,
+    );
     const textSettings = buildTextSettingsResponse(
       integrationStatus.loyaltySetting,
     );
@@ -376,6 +475,11 @@ async function getLoyaltyBalance(customerId, shop) {
     getRewardOptionsForPreference(
       customer.shop?.loyaltySetting?.redemptionRewards,
     ) || DEFAULT_REWARD_OPTIONS;
+  const surfaceRewardOptions = getSurfaceRewardOptions(
+    rewardOptions,
+    customer.shop?.loyaltySetting,
+    surface,
+  );
   const checkoutRedemptionEnabled = isCheckoutRedemptionAvailable(
     customer.shop,
     customer.shop?.loyaltySetting,
@@ -394,12 +498,18 @@ async function getLoyaltyBalance(customerId, shop) {
     customer.shop?.shopDomain || shopDomain,
     shopifyCustomerId,
   );
+  const pendingCheckoutRedemption =
+    ["checkout", "theme"].includes(surface)
+      ? await getPendingCheckoutRedemption(customer.id)
+      : null;
 
   return json({
     success: true,
     customerId: customer.id,
     loyaltyPoints: customer.loyaltyPoints,
-    rewardOptions,
+    rewardOptions: surfaceRewardOptions,
+    pendingCheckoutRedemption,
+    hasPendingCheckoutRedemption: Boolean(pendingCheckoutRedemption),
     storeCreditReward,
     storeCreditBalance,
     checkoutRedemptionEnabled: rewardsRedemptionEnabled,
@@ -451,7 +561,11 @@ export const loader = async ({ request }) => {
 
     await ensureWebhooksFromPublicRequest(shopDomain, origin);
 
-    return getLoyaltyBalance(url.searchParams.get("customerId"), shop);
+    return getLoyaltyBalance(
+      url.searchParams.get("customerId"),
+      shop,
+      url.searchParams.get("surface"),
+    );
   } catch (error) {
     logError("loyalty-balance:loader", error);
 
@@ -480,7 +594,7 @@ export const action = async ({ request }) => {
 
     await ensureWebhooksFromPublicRequest(shopDomain, origin);
 
-    return getLoyaltyBalance(body.customerId, body.shop);
+    return getLoyaltyBalance(body.customerId, body.shop, body.surface);
   } catch (error) {
     logError("loyalty-balance:action", error);
 

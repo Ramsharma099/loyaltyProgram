@@ -1,12 +1,13 @@
 import "@shopify/ui-extensions/preact";
+/* global globalThis */
 import {
   useAuthenticatedAccountCustomer,
   useSettings,
 } from "@shopify/ui-extensions/customer-account/preact";
 import { render } from "preact";
-import { useEffect, useRef, useState, useCallback } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState, useCallback } from "preact/hooks";
 import { fetchApiJson } from "./api";
-import { API_BASE_URL } from "./api-base-url.generated";
+import { API_BASE_URL } from "./api-base-url";
 
 const HISTORY_PAGE_SIZE = 8;
 const APP_PROXY_PATH = "/apps/loyalty-points";
@@ -38,6 +39,36 @@ function getRewardTypeBadge(activityType) {
   }
 
   return { icon: "discount", label: "DISCOUNT", tone: "info" };
+}
+
+function getActivityStatusLabel(label) {
+  const status = String(label || "Activity").trim().split(/\s+/).pop();
+
+  return status
+    ? `${status.charAt(0).toUpperCase()}${status.slice(1).toLowerCase()}`
+    : "Activity";
+}
+
+function getHistorySearchText(item) {
+  const createdAt = item.createdAt ? new Date(item.createdAt) : null;
+
+  return [
+    item.label,
+    item.activityType,
+    item.rewardCode,
+    item.pointsUsed,
+    item.discountAmount,
+    item.orderName,
+    item.orderId,
+    item.message,
+    item.customerName,
+    item.customerEmail,
+    createdAt?.toISOString(),
+    createdAt?.toLocaleString(),
+  ]
+    .filter((value) => value !== null && value !== undefined)
+    .join(" ")
+    .toLowerCase();
 }
 
 function getSettingValue(settings, key, fallback) {
@@ -176,6 +207,33 @@ function buildApiUrls(apiBaseUrls, endpoint, params) {
   return apiBaseUrls.map((apiBaseUrl) => buildApiUrl(apiBaseUrl, endpoint, params));
 }
 
+function buildCustomerAccountIframeUrl(
+  apiBaseUrls,
+  customerId,
+  customerEmail,
+  shopDomain,
+) {
+  const apiBaseUrl = normalizeApiBaseUrl(apiBaseUrls[0]);
+
+  if (!apiBaseUrl || !customerId) {
+    return "";
+  }
+
+  const params = new URLSearchParams({
+    customerId,
+    customerEmail: customerEmail || "",
+    shop: shopDomain || "",
+    redeemUrl: `${apiBaseUrl}/api/redeem-points`,
+    surface: "account",
+    heading: "Rewards wallet",
+    eyebrow: "Loyalty",
+    rewardsHeading: "Available store credit rewards",
+    noRewardsMessage: "Store credit rewards are not configured yet.",
+  });
+
+  return `${apiBaseUrl}/api/loyalty-iframe?${params}`;
+}
+
 export function renderLoyaltyAccountExtension() {
   render(<CustomerAccountLoyaltyPoints />, document.body);
 }
@@ -184,13 +242,18 @@ export default function extension() {
   renderLoyaltyAccountExtension();
 }
 
-function CustomerAccountLoyaltyPoints() {
+export function CustomerAccountLoyaltyPoints() {
   const settings = useSettings();
   const customer = useAuthenticatedAccountCustomer();
   const [proxyShopDomain, setProxyShopDomain] = useState("");
   const [isResolvingProxyBaseUrl, setIsResolvingProxyBaseUrl] = useState(true);
-  const apiBaseUrls = getApiBaseUrls(settings);
+  const apiBaseUrls = useMemo(() => getApiBaseUrls(settings), [settings]);
   const apiBaseUrlsKey = apiBaseUrls.join("|");
+  const accountRenderMode = getSettingValue(
+    settings,
+    "accountRenderMode",
+    "native",
+  );
 
   const [points, setPoints] = useState(0);
   const [customerId, setCustomerId] = useState(null);
@@ -204,6 +267,7 @@ function CustomerAccountLoyaltyPoints() {
   const [apiTextSettings, setApiTextSettings] = useState({});
   const [activeTab, setActiveTab] = useState("balance");
   const [history, setHistory] = useState([]);
+  const [historySearch, setHistorySearch] = useState("");
   const [historyPage, setHistoryPage] = useState(1);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const confirmationModalRef = useRef(null);
@@ -269,6 +333,20 @@ function CustomerAccountLoyaltyPoints() {
   const configErrorMsg = getTextSetting(
     "accountConfigErrorMsg",
     "Loyalty API URL is not configured.",
+  );
+  const iframeButtonText = getTextSetting(
+    "accountIframeButtonText",
+    "Open rewards wallet",
+  );
+  const iframeDescription = getTextSetting(
+    "accountIframeDescription",
+    "Open the iframe version of your loyalty wallet with your current points and rewards.",
+  );
+  const customerAccountIframeUrl = buildCustomerAccountIframeUrl(
+    apiBaseUrls,
+    customer?.id,
+    customer?.emailAddress?.emailAddress,
+    proxyShopDomain,
   );
 
   useEffect(() => {
@@ -391,6 +469,7 @@ function CustomerAccountLoyaltyPoints() {
     };
   }, [
     apiBaseUrlsKey,
+    apiBaseUrls,
     customer?.id,
     configErrorMsg,
     isResolvingProxyBaseUrl,
@@ -435,20 +514,47 @@ function CustomerAccountLoyaltyPoints() {
     return () => {
       isCurrent = false;
     };
-  }, [apiBaseUrlsKey, customer?.id, isResolvingProxyBaseUrl, proxyShopDomain]);
+  }, [
+    apiBaseUrls,
+    customer?.id,
+    isResolvingProxyBaseUrl,
+    proxyShopDomain,
+  ]);
 
   useEffect(() => {
     fetchHistory();
   }, [fetchHistory]);
 
+  const filteredHistory = useMemo(() => {
+    const query = historySearch.trim().toLowerCase();
+
+    if (!query) {
+      return history;
+    }
+
+    return history.filter((item) => getHistorySearchText(item).includes(query));
+  }, [history, historySearch]);
   const historyPageCount = Math.max(
     1,
-    Math.ceil(history.length / HISTORY_PAGE_SIZE),
+    Math.ceil(filteredHistory.length / HISTORY_PAGE_SIZE),
   );
-  const paginatedHistory = history.slice(
+  const paginatedHistory = filteredHistory.slice(
     (historyPage - 1) * HISTORY_PAGE_SIZE,
     historyPage * HISTORY_PAGE_SIZE,
   );
+
+  const handleHistorySearch = (event) => {
+    const inputSource = event.composedPath?.()[0];
+    const nextValue =
+      inputSource?.value ??
+      event.detail?.value ??
+      event.target?.value ??
+      event.currentTarget?.value ??
+      "";
+
+    setHistorySearch(String(nextValue));
+    setHistoryPage(1);
+  };
 
   const redeemStoreCredit = async () => {
     const pointsToRedeem = Number(storeCreditPoints);
@@ -574,9 +680,47 @@ function CustomerAccountLoyaltyPoints() {
     setStoreCreditPoints(String(nextValue));
   };
 
+  if (accountRenderMode === "iframe_link") {
+    return (
+      <s-box border="base" padding="large" borderRadius="base">
+        <s-stack gap="base">
+          <s-stack gap="none">
+            <s-text>LOYALTY</s-text>
+            <s-heading>Rewards wallet</s-heading>
+          </s-stack>
+
+          {message ? (
+            <s-banner>
+              <s-text>{message}</s-text>
+            </s-banner>
+          ) : null}
+
+          <s-box border="base" padding="large" borderRadius="base">
+            <s-stack gap="base">
+              <s-heading>{balanceTitle}</s-heading>
+              <s-text>{iframeDescription}</s-text>
+              <s-stack gap="small">
+                <s-text>{availableLabel}</s-text>
+                <s-heading>{isLoading ? loadingText : pointsLabel}</s-heading>
+              </s-stack>
+
+              {customerAccountIframeUrl ? (
+                <s-link href={customerAccountIframeUrl} target="_blank">
+                  {iframeButtonText}
+                </s-link>
+              ) : (
+                <s-text>{configErrorMsg}</s-text>
+              )}
+            </s-stack>
+          </s-box>
+        </s-stack>
+      </s-box>
+    );
+  }
+
   return (
-    <s-box border="base" padding="large" borderRadius="base">
-      <s-stack gap="base">
+    <s-box border="base" padding="large" borderRadius="large">
+      <s-stack gap="large">
         <s-button-group>
           <s-button
             slot="primary-action"
@@ -601,36 +745,60 @@ function CustomerAccountLoyaltyPoints() {
         ) : null}
 
         {activeTab === "balance" ? (
-          <>
-            <s-heading>{balanceTitle}</s-heading>
-            <s-text>{availableLabel}</s-text>
-
-            <s-box border="base" padding="large" borderRadius="base">
-              <s-stack gap="small">
-                <s-text>{currentBalanceLabel}</s-text>
-                <s-heading>{isLoading ? loadingText : pointsLabel}</s-heading>
+          <s-stack gap="large">
+            <s-grid
+              gridTemplateColumns="1fr auto"
+              gap="base"
+              alignItems="center"
+            >
+              <s-stack direction="inline" gap="small" alignItems="center">
+                <s-icon type="star" tone="success" />
+                <s-stack gap="none">
+                  <s-heading>{balanceTitle}</s-heading>
+                  <s-text color="subdued">{availableLabel}</s-text>
+                </s-stack>
               </s-stack>
-            </s-box>
+              <s-badge icon="cash-dollar" color="subdued">
+                Store credit
+              </s-badge>
+            </s-grid>
+
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <s-box background="subdued" padding="large" borderRadius="large">
+                <s-stack gap="small">
+                  <s-stack direction="inline" gap="small" alignItems="center">
+                    <s-icon type="star-filled" tone="success" />
+                    <s-text color="subdued">{currentBalanceLabel}</s-text>
+                  </s-stack>
+                  <s-heading>{isLoading ? loadingText : pointsLabel}</s-heading>
+                </s-stack>
+              </s-box>
+              <s-box background="subdued" padding="large" borderRadius="large">
+                <s-stack gap="small">
+                  <s-stack direction="inline" gap="small" alignItems="center">
+                    <s-icon type="cash-dollar" tone="success" />
+                    <s-text color="subdued">Available store credit</s-text>
+                  </s-stack>
+                  <s-heading>
+                    {isLoading
+                      ? loadingText
+                      : `$${Number(storeCreditBalance?.amount || 0).toLocaleString()}`}
+                  </s-heading>
+                </s-stack>
+              </s-box>
+            </s-grid>
 
             {storeCreditReward ? (
-              <s-box border="base" padding="large" borderRadius="base">
-                <s-stack gap="base">
-                  <s-stack gap="none">
-                    <s-text>{storeCreditTitle}</s-text>
-                    <s-text>{formattedConversionRate}</s-text>
-                  </s-stack>
-
-                  <s-stack direction="inline" alignItems="center" gap="small">
-                    <s-text>Available store credit:</s-text>
-                    <s-text>
-                      {isLoading
-                        ? loadingText
-                        : Number(storeCreditBalance?.amount || 0).toLocaleString()}
-                    </s-text>
+              <s-section heading={storeCreditTitle}>
+                <s-stack gap="large">
+                  <s-stack direction="inline" gap="small" alignItems="center">
+                    <s-icon type="savings" tone="success" />
+                    <s-text color="subdued">{formattedConversionRate}</s-text>
                   </s-stack>
 
                   <s-number-field
                     label="Points to convert"
+                    details={`Choose a multiple of ${storeCreditPointStep.toLocaleString()} points.`}
                     value={storeCreditPoints}
                     min={storeCreditPointStep}
                     max={maxStoreCreditPoints}
@@ -645,8 +813,24 @@ function CustomerAccountLoyaltyPoints() {
                     onInput={handleStoreCreditPointsInput}
                     onChange={handleStoreCreditPointsInput}
                   />
+
+                  <s-box background="subdued" padding="base" borderRadius="base">
+                    <s-grid
+                      gridTemplateColumns="1fr auto"
+                      gap="base"
+                      alignItems="center"
+                    >
+                      <s-stack gap="none">
+                        <s-text color="subdued">You will receive</s-text>
+                        <s-text type="small">Shopify store credit</s-text>
+                      </s-stack>
+                      <s-heading>${selectedStoreCreditAmount}</s-heading>
+                    </s-grid>
+                  </s-box>
+
                   <s-button
                     variant="primary"
+                    loading={isRedeeming}
                     command="--show"
                     commandFor="store-credit-confirmation"
                     disabled={
@@ -693,180 +877,212 @@ function CustomerAccountLoyaltyPoints() {
                     </s-button>
                   </s-modal>
                   {!isRedemptionEnabled ? (
-                    <s-text>{disabledMsg}</s-text>
+                    <s-banner tone="warning">
+                      <s-text>{disabledMsg}</s-text>
+                    </s-banner>
                   ) : null}
                 </s-stack>
-              </s-box>
+              </s-section>
             ) : null}
-          </>
+          </s-stack>
         ) : (
-          <>
-            <s-stack
-              direction="inline"
-              alignItems="center"
-              justifyContent="space-between"
+          <s-stack gap="large">
+            <s-grid
+              gridTemplateColumns="1fr auto"
               gap="base"
+              alignItems="center"
             >
-              <s-stack direction="inline" alignItems="center" gap="small">
-                <s-heading>History</s-heading>
-                <s-text>
-                  {history.length} item{history.length === 1 ? "" : "s"}
-                </s-text>
+              <s-stack direction="inline" gap="small" alignItems="center">
+                <s-icon type="clock" tone="neutral" />
+                <s-stack gap="none">
+                  <s-heading>Reward history</s-heading>
+                  <s-text color="subdued">
+                    {historySearch
+                      ? `${filteredHistory.length} of ${history.length} activities`
+                      : `${history.length} activit${history.length === 1 ? "y" : "ies"}`}
+                  </s-text>
+                </s-stack>
               </s-stack>
               <s-button
                 variant="secondary"
+                loading={isLoadingHistory}
                 disabled={isLoadingHistory}
                 onClick={fetchHistory}
               >
                 Refresh
               </s-button>
-            </s-stack>
+            </s-grid>
+
+            <s-text-field
+              label="Search reward history"
+              labelAccessibilityVisibility="exclusive"
+              icon="search"
+              placeholder="Search code, status, order or message"
+              value={historySearch}
+              onInput={handleHistorySearch}
+              onChange={handleHistorySearch}
+            />
 
             {isLoadingHistory ? (
-              <s-text>{loadingText}</s-text>
-            ) : history.length === 0 ? (
-              <s-stack gap="small">
-                <s-text>No reward history</s-text>
-                <s-text>Your reward activities will appear here. Try refreshing to check for recent activity.</s-text>
-                <s-button variant="secondary" disabled={isLoadingHistory} onClick={fetchHistory}>
-                  Refresh
-                </s-button>
-              </s-stack>
+              <s-box background="subdued" padding="large" borderRadius="large">
+                <s-stack direction="inline" gap="small" alignItems="center">
+                  <s-spinner size="small" />
+                  <s-text>{loadingText}</s-text>
+                </s-stack>
+              </s-box>
+            ) : filteredHistory.length === 0 ? (
+              <s-box background="subdued" padding="large" borderRadius="large">
+                <s-stack gap="base" alignItems="center">
+                  <s-icon
+                    type={historySearch ? "search" : "clock"}
+                    size="large"
+                    tone="neutral"
+                  />
+                  <s-heading>
+                    {historySearch ? "No matching activity" : "No reward history yet"}
+                  </s-heading>
+                  <s-text color="subdued">
+                    {historySearch
+                      ? `No reward activity matches “${historySearch}”.`
+                      : "Reward activity will appear here after your first redemption."}
+                  </s-text>
+                  {historySearch ? (
+                    <s-button
+                      variant="secondary"
+                      onClick={() => {
+                        setHistorySearch("");
+                        setHistoryPage(1);
+                      }}
+                    >
+                      Clear search
+                    </s-button>
+                  ) : (
+                    <s-button variant="secondary" onClick={fetchHistory}>
+                      Check again
+                    </s-button>
+                  )}
+                </s-stack>
+              </s-box>
             ) : (
-              <>
-              <s-box border="base" borderRadius="base" padding="base">
-  <s-stack gap="small">
+              <s-stack gap="base">
+                {paginatedHistory.map((item) => {
+                  const activityAppearance = ACTIVITY_APPEARANCE[
+                    item.activityType
+                  ] || {
+                    icon: "info",
+                    tone: "neutral",
+                  };
+                  const rewardTypeBadge = getRewardTypeBadge(item.activityType);
+                  const rewardCode = item.activityType?.startsWith(
+                    "store_credit",
+                  )
+                    ? "Store credit"
+                    : item.rewardCode || "Reward activity";
 
-    {/* Header */}
-    <s-grid
-      gridTemplateColumns="1.3fr 1fr 1.4fr 0.7fr 0.8fr 0.7fr 1.6fr 1.1fr"
-      gap="none"
-    >
-      <s-grid-item><s-text>ACTIVITY</s-text></s-grid-item>
-      <s-grid-item><s-text>TYPE</s-text></s-grid-item>
-      {/* <s-grid-item><s-text>CUSTOMER</s-text></s-grid-item> */}
-      <s-grid-item><s-text>REWARD CODE</s-text></s-grid-item>
-      <s-grid-item><s-text>POINTS</s-text></s-grid-item>
-      <s-grid-item><s-text>AMOUNT</s-text></s-grid-item>
-      <s-grid-item><s-text>ORDER</s-text></s-grid-item>
-      <s-grid-item><s-text>MESSAGE</s-text></s-grid-item>
-      <s-grid-item><s-text>TIME</s-text></s-grid-item>
-    </s-grid>
+                  return (
+                    <s-box
+                      key={item.id}
+                      border="base"
+                      borderRadius="large"
+                      padding="base"
+                    >
+                      <s-stack gap="base">
+                        <s-grid
+                          gridTemplateColumns="1fr auto"
+                          gap="base"
+                          alignItems="center"
+                        >
+                          <s-stack
+                            direction="inline"
+                            gap="small"
+                            alignItems="center"
+                          >
+                            <s-icon
+                              type={activityAppearance.icon}
+                              tone={activityAppearance.tone}
+                            />
+                            <s-stack gap="none">
+                              <s-text type="strong">{rewardCode}</s-text>
+                              <s-text color="subdued" type="small">
+                                {item.createdAt
+                                  ? new Date(item.createdAt).toLocaleString()
+                                  : "-"}
+                              </s-text>
+                            </s-stack>
+                          </s-stack>
+                          <s-stack direction="inline" gap="small">
+                            <s-badge
+                              tone={
+                                activityAppearance.tone === "critical"
+                                  ? "critical"
+                                  : "neutral"
+                              }
+                            >
+                              {getActivityStatusLabel(item.label)}
+                            </s-badge>
+                            <s-badge
+                              icon={rewardTypeBadge.icon}
+                              color="subdued"
+                            >
+                              {rewardTypeBadge.label}
+                            </s-badge>
+                          </s-stack>
+                        </s-grid>
 
-    {paginatedHistory.map((item) => {
-      const activityAppearance = ACTIVITY_APPEARANCE[item.activityType] || {
-        icon: "info",
-        tone: "neutral",
-      };
-      const rewardTypeBadge = getRewardTypeBadge(item.activityType);
+                        <s-grid gridTemplateColumns="1fr 1fr 1fr" gap="small">
+                          <s-box
+                            background="subdued"
+                            padding="small"
+                            borderRadius="base"
+                          >
+                            <s-stack gap="none">
+                              <s-text color="subdued" type="small">Points</s-text>
+                              <s-text type="strong">{item.pointsUsed ?? "-"}</s-text>
+                            </s-stack>
+                          </s-box>
+                          <s-box
+                            background="subdued"
+                            padding="small"
+                            borderRadius="base"
+                          >
+                            <s-stack gap="none">
+                              <s-text color="subdued" type="small">Amount</s-text>
+                              <s-text type="strong">
+                                {item.discountAmount
+                                  ? `$${Number(item.discountAmount).toFixed(2)}`
+                                  : "-"}
+                              </s-text>
+                            </s-stack>
+                          </s-box>
+                          <s-box
+                            background="subdued"
+                            padding="small"
+                            borderRadius="base"
+                          >
+                            <s-stack gap="none">
+                              <s-text color="subdued" type="small">Order</s-text>
+                              <s-text type="strong">
+                                {item.orderName || item.orderId || "-"}
+                              </s-text>
+                            </s-stack>
+                          </s-box>
+                        </s-grid>
 
-      return (
-      <s-box
-        key={item.id}
-        border="base"
-        borderRadius="base"
-        padding="small"
-      >
-        <s-grid
-          gridTemplateColumns="1.3fr 1fr 1.4fr 0.7fr 0.8fr 0.7fr 1.6fr 1.1fr"
-          gap="small"
-        >
-          {/* Activity */}
-          <s-grid-item>
-            <s-stack direction="inline" gap="tight" alignItems="center">
-              {/* <s-icon
-                type={activityAppearance.icon}
-                tone={activityAppearance.tone}
-                size="small"
-              /> */}
-              <s-badge
-                tone={activityAppearance.tone === "critical" ? "critical" : "neutral"}
-              >
-                {item.label || "Activity"}
-              </s-badge>
-            </s-stack>
-          </s-grid-item>
+                        <s-text color="subdued">
+                          {item.message || "Reward activity updated."}
+                        </s-text>
+                      </s-stack>
+                    </s-box>
+                  );
+                })}
 
-          {/* Type */}
-          <s-grid-item>
-            <s-stack direction="inline" gap="tight" alignItems="center">
-              {/* <s-icon
-                type={rewardTypeBadge.icon}
-                tone={rewardTypeBadge.tone}
-                size="small"
-              /> */}
-              <s-badge color="subdued">{rewardTypeBadge.label}</s-badge>
-            </s-stack>
-          </s-grid-item>
-
-          {/* Customer */}
-          {/* <s-grid-item>
-            <s-stack gap="none">
-              <s-text emphasis="bold">
-                {item.customerName || customer?.displayName || "-"}
-              </s-text>
-
-              <s-text appearance="subdued">
-                {item.customerEmail || customer?.emailAddress?.emailAddress || "-"}
-              </s-text>
-            </s-stack>
-          </s-grid-item> */}
-
-          {/* Reward Code */}
-          <s-grid-item>
-            <s-text>
-              {item.activityType?.startsWith("store_credit")
-                ? "-"
-                : item.rewardCode || "-"}
-            </s-text>
-          </s-grid-item>
-
-          {/* Points */}
-          <s-grid-item>
-            <s-text>{item.pointsUsed ?? "-"}</s-text>
-          </s-grid-item>
-
-          {/* Amount */}
-          <s-grid-item>
-            <s-text>
-              {item.discountAmount
-                ? `$${Number(item.discountAmount).toFixed(2)}`
-                : "-"}
-            </s-text>
-          </s-grid-item>
-
-          {/* Order */}
-          <s-grid-item>
-            <s-text>{item.orderName || item.orderId || "-"}</s-text>
-          </s-grid-item>
-
-          {/* Message */}
-          <s-grid-item>
-            <s-text>
-              {item.message ||
-                (item.label?.includes("applied")
-                  ? "Gift card applied to a paid order."
-                  : "Gift card created and issued successfully.")}
-            </s-text>
-          </s-grid-item>
-
-          {/* Time */}
-          <s-grid-item>
-            <s-text>
-              {item.createdAt
-                ? new Date(item.createdAt).toLocaleString()
-                : "-"}
-            </s-text>
-          </s-grid-item>
-        </s-grid>
-      </s-box>
-      );
-    })}
-  </s-stack>
-</s-box>
                 {historyPageCount > 1 ? (
-                  <s-stack gap="small">
-                    <s-text>
+                  <s-grid
+                    gridTemplateColumns="1fr auto"
+                    gap="base"
+                    alignItems="center"
+                  >
+                    <s-text color="subdued">
                       Page {historyPage} of {historyPageCount}
                     </s-text>
                     <s-button-group>
@@ -887,11 +1103,11 @@ function CustomerAccountLoyaltyPoints() {
                         Next
                       </s-button>
                     </s-button-group>
-                  </s-stack>
+                  </s-grid>
                 ) : null}
-              </>
+              </s-stack>
             )}
-          </>
+          </s-stack>
         )}
       </s-stack>
     </s-box>

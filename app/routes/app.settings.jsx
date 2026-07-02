@@ -1,33 +1,35 @@
+/* global process */
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import {
   Form,
   useActionData,
   useLoaderData,
   useNavigation,
 } from "react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import {
-  filterLoyaltySettingData,
-  getLoyaltySettings,
-} from "../services/loyalty-settings.server";
+import { filterLoyaltySettingData } from "../services/loyalty-settings.server";
 import {
   DEFAULT_GIFT_CARD_REWARD_OPTIONS,
   DEFAULT_LOYALTY_SETTINGS,
   getRewardTypePreferenceFromSettings,
   getRewardOptionsForPreference,
+  normalizeCheckoutRewardLimit,
   normalizeRewardOptions,
   normalizeRewardTypePreference,
   serializeRewardSettings,
 } from "../services/loyalty-settings.shared";
 import { INTEGRATION_OPTIONS } from "../services/integrations.shared";
 import {
-  canUseCheckoutIntegration,
   getEffectiveIntegration,
-  syncShopPlan,
 } from "../services/shop-plan.server";
 import { logError } from "../services/errors.server";
+import { ensurePlanAwareLoyaltySetup } from "../services/loyalty-installation.server";
+import { getPublicRequestOrigin } from "../services/webhook-subscriptions.server";
 
 const SETTING_FIELDS = [
   {
@@ -98,6 +100,135 @@ const REWARD_TYPE_CHOICES = [
     value: "both",
     label: "Both",
     description: "Customers can choose gift cards or discounts.",
+  },
+];
+
+const IFRAME_TEXT_FIELDS = [
+  {
+    name: "iframeEyebrow",
+    label: "Eyebrow text",
+    details: "Small label above the iframe heading.",
+  },
+  {
+    name: "iframeHeading",
+    label: "Heading",
+    details: "Main title shown at the top of the iframe.",
+  },
+  {
+    name: "iframeLoggedOutMessage",
+    label: "Logged-out message",
+    details: "Message shown when no customer is signed in.",
+  },
+  {
+    name: "iframeLoginLabel",
+    label: "Login button text",
+    details: "Text for the sign-in button/link.",
+  },
+  {
+    name: "iframePointsTemplate",
+    label: "Points message",
+    details: "Use {points} where the current balance should appear.",
+  },
+  {
+    name: "iframeRewardsHeading",
+    label: "Rewards heading",
+    details: "Heading above reward options.",
+  },
+  {
+    name: "iframeNoRewardsMessage",
+    label: "No rewards message",
+    details: "Message shown when no reward can be displayed.",
+  },
+  {
+    name: "iframeRedeemButtonText",
+    label: "Redeem button text",
+    details: "CTA text for available rewards.",
+  },
+];
+
+const IFRAME_COLOR_FIELDS = [
+  {
+    name: "iframeAccentColor",
+    label: "Button color",
+  },
+  {
+    name: "iframeBackgroundColor",
+    label: "Background",
+  },
+  {
+    name: "iframeForegroundColor",
+    label: "Text color",
+  },
+  {
+    name: "iframeBorderColor",
+    label: "Border color",
+  },
+];
+
+const IFRAME_FONT_FAMILY_OPTIONS = [
+  {
+    value: "system",
+    label: "System",
+  },
+  {
+    value: "inter",
+    label: "Inter",
+  },
+  {
+    value: "roboto",
+    label: "Roboto",
+  },
+  {
+    value: "open_sans",
+    label: "Open Sans",
+  },
+  {
+    value: "lato",
+    label: "Lato",
+  },
+  {
+    value: "montserrat",
+    label: "Montserrat",
+  },
+  {
+    value: "poppins",
+    label: "Poppins",
+  },
+  {
+    value: "nunito",
+    label: "Nunito",
+  },
+  {
+    value: "raleway",
+    label: "Raleway",
+  },
+  {
+    value: "playfair_display",
+    label: "Playfair Display",
+  },
+  {
+    value: "merriweather",
+    label: "Merriweather",
+  },
+  {
+    value: "oswald",
+    label: "Oswald",
+  },
+  {
+    value: "source_sans_3",
+    label: "Source Sans 3",
+  },
+  {
+    value: "arial",
+    label: "Arial",
+  },
+  {
+    value: "georgia",
+    label: "Georgia",
+  },
+  {
+    value: "mono",
+    label: "Mono",
   },
 ];
 
@@ -259,6 +390,58 @@ function parsePositiveInteger(formData, fieldName) {
   return value;
 }
 
+function parseCheckoutRewardLimit(formData) {
+  const value = Number(formData.get("checkoutRewardLimit"));
+
+  if (!Number.isInteger(value) || value < 1 || value > 20) {
+    return null;
+  }
+
+  return value;
+}
+
+function normalizeTextSetting(formData, fieldName) {
+  const fallback = DEFAULT_LOYALTY_SETTINGS[fieldName] || "";
+  const value = String(formData.get(fieldName) || "").trim();
+
+  return value || fallback;
+}
+
+function normalizeColorSetting(formData, fieldName) {
+  const fallback = DEFAULT_LOYALTY_SETTINGS[fieldName] || "#000000";
+  const value = String(formData.get(fieldName) || "").trim();
+
+  if (/^#[0-9a-f]{6}$/i.test(value)) {
+    return value;
+  }
+
+  return fallback;
+}
+
+function normalizeFontFamilySetting(formData) {
+  const value = String(formData.get("iframeFontFamily") || "").trim();
+
+  return IFRAME_FONT_FAMILY_OPTIONS.some((option) => option.value === value)
+    ? value
+    : DEFAULT_LOYALTY_SETTINGS.iframeFontFamily;
+}
+
+function parseIframeFontSize(formData) {
+  const value = Number(formData.get("iframeFontSize"));
+
+  if (!Number.isInteger(value) || value < 12 || value > 20) {
+    return null;
+  }
+
+  return value;
+}
+
+function normalizeCustomCssSetting(formData) {
+  return String(formData.get("iframeCustomCss") || "")
+    .replace(/<\/style/gi, "<\\/style")
+    .slice(0, 20000);
+}
+
 function getSettingValue(values, fieldName) {
   return String(
     values?.[fieldName] ?? DEFAULT_LOYALTY_SETTINGS[fieldName] ?? "",
@@ -271,6 +454,60 @@ function getBooleanSettingValue(values, fieldName) {
   return value === true || value === "true";
 }
 
+function getIframeAppearanceValues(values) {
+  return {
+    ...Object.fromEntries(
+      IFRAME_COLOR_FIELDS.map((field) => [
+        field.name,
+        getSettingValue(values, field.name),
+      ]),
+    ),
+    iframeFontFamily: getSettingValue(values, "iframeFontFamily"),
+    iframeFontSize: getSettingValue(values, "iframeFontSize"),
+    iframeCustomCss: getSettingValue(values, "iframeCustomCss"),
+  };
+}
+
+async function getSavedIframeAppearance(shopId) {
+  const rows = await prisma.$queryRaw`
+    SELECT
+      iframeAccentColor,
+      iframeBackgroundColor,
+      iframeForegroundColor,
+      iframeBorderColor,
+      iframeFontFamily,
+      iframeFontSize,
+      iframeCustomCss
+    FROM LoyaltySetting
+    WHERE shopId = ${shopId}
+    LIMIT 1
+  `;
+
+  return rows?.[0] || {};
+}
+
+async function mergeSavedIframeAppearance(settings, shopId) {
+  return {
+    ...settings,
+    ...(await getSavedIframeAppearance(shopId)),
+  };
+}
+
+async function updateSavedIframeAppearance(shopId, values) {
+  await prisma.$executeRaw`
+    UPDATE LoyaltySetting
+    SET
+      iframeAccentColor = ${values.iframeAccentColor},
+      iframeBackgroundColor = ${values.iframeBackgroundColor},
+      iframeForegroundColor = ${values.iframeForegroundColor},
+      iframeBorderColor = ${values.iframeBorderColor},
+      iframeFontFamily = ${values.iframeFontFamily},
+      iframeFontSize = ${values.iframeFontSize},
+      iframeCustomCss = ${values.iframeCustomCss}
+    WHERE shopId = ${shopId}
+  `;
+}
+
 function getRewardTypePreferenceValue(values) {
   return normalizeRewardTypePreference(
     values?.rewardTypePreference ??
@@ -281,6 +518,17 @@ function getRewardTypePreferenceValue(values) {
 
 function formatNumber(value) {
   return new Intl.NumberFormat("en").format(Number(value) || 0);
+}
+
+function formatCurrency(value, currencyCode) {
+  try {
+    return new Intl.NumberFormat("en", {
+      style: "currency",
+      currency: currencyCode,
+    }).format(Number(value) || 0);
+  } catch {
+    return `${currencyCode} ${formatNumber(value)}`;
+  }
 }
 
 function getRewardSummary(rows, rewardType) {
@@ -315,6 +563,364 @@ function getRewardSummary(rows, rewardType) {
     bestValueReward,
     totalRewardValue: validRows.reduce((sum, row) => sum + row.amount, 0),
   };
+}
+
+function getEndpointUrl(apiBaseUrl, path, query = "") {
+  return `${apiBaseUrl}${path}${query}`;
+}
+
+function normalizeOrigin(value) {
+  if (!value) {
+    return "";
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "";
+  }
+}
+
+async function getDevManifestAppOrigin() {
+  try {
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(process.cwd(), ".shopify/dev-bundle/manifest.json"),
+        "utf8",
+      ),
+    );
+    const appUrl = manifest?.modules?.find(
+      (module) => module?.type === "app_home",
+    )?.config?.app_url;
+    const origin = normalizeOrigin(appUrl);
+
+    return origin.endsWith(".trycloudflare.com") ? origin : "";
+  } catch {
+    return "";
+  }
+}
+
+async function getSettingsApiBaseUrl(request) {
+  return (await getDevManifestAppOrigin()) || getPublicRequestOrigin(request);
+}
+
+function buildHeadlessApiSections(apiBaseUrl, shop) {
+  const shopQuery = `shop=${shop}`;
+
+  return [
+    {
+      title: "Program settings",
+      method: "GET",
+      description:
+        "Fetch active loyalty earning rules, redemption status, reward preference, and configured reward options.",
+      url: getEndpointUrl(apiBaseUrl, "/api/loyalty-program", `?${shopQuery}`),
+      exampleUrl: getEndpointUrl(
+        apiBaseUrl,
+        "/api/loyalty-program",
+        `?${shopQuery}`,
+      ),
+      parameters: [
+        {
+          name: "shop",
+          type: "string",
+          defaultValue: "-",
+          description: "Your Shopify store domain. Required.",
+        },
+      ],
+    },
+    {
+      title: "Customer balance",
+      method: "GET or POST",
+      description:
+        "Fetch loyalty points, available rewards, pending checkout discounts, and customer-facing text settings.",
+      url: getEndpointUrl(
+        apiBaseUrl,
+        "/api/loyalty-balance",
+        `?customerId={customer_id}&${shopQuery}&surface=theme`,
+      ),
+      exampleUrl: getEndpointUrl(
+        apiBaseUrl,
+        "/api/loyalty-balance",
+        `?customerId=1234567890&${shopQuery}&surface=theme`,
+      ),
+      parameters: [
+        {
+          name: "customerId",
+          type: "string",
+          defaultValue: "-",
+          description: "Shopify customer ID or Customer GID. Required.",
+        },
+        {
+          name: "shop",
+          type: "string",
+          defaultValue: "-",
+          description: "Your Shopify store domain. Required.",
+        },
+        {
+          name: "surface",
+          type: "string",
+          defaultValue: "theme",
+          description: "Calling surface. Values: theme / checkout / account.",
+        },
+      ],
+    },
+    {
+      title: "Reward history",
+      method: "GET",
+      description:
+        "Fetch recent reward activity for a customer, including readable labels, reward codes, order IDs, and point values.",
+      url: getEndpointUrl(
+        apiBaseUrl,
+        "/api/customer-reward-history",
+        `?customerId={customer_id}&${shopQuery}`,
+      ),
+      exampleUrl: getEndpointUrl(
+        apiBaseUrl,
+        "/api/customer-reward-history",
+        `?customerId=1234567890&${shopQuery}`,
+      ),
+      parameters: [
+        {
+          name: "customerId",
+          type: "string",
+          defaultValue: "-",
+          description: "Shopify customer ID or Customer GID. Required.",
+        },
+        {
+          name: "shop",
+          type: "string",
+          defaultValue: "-",
+          description: "Your Shopify store domain. Required.",
+        },
+      ],
+    },
+    {
+      title: "Redeem points",
+      method: "POST",
+      description:
+        "Create a discount, gift card, or store-credit reward for a customer. Fully CORS enabled.",
+      url: getEndpointUrl(apiBaseUrl, "/api/redeem-points"),
+      exampleUrl: getEndpointUrl(apiBaseUrl, "/api/redeem-points"),
+      parameters: [
+        {
+          name: "customerId",
+          type: "string",
+          defaultValue: "-",
+          description: "App customer ID, Shopify customer ID, or Customer GID. Required.",
+        },
+        {
+          name: "shop",
+          type: "string",
+          defaultValue: "-",
+          description: "Your Shopify store domain. Required for Shopify customer IDs.",
+        },
+        {
+          name: "pointsToRedeem",
+          type: "number",
+          defaultValue: "-",
+          description: "Points to redeem. Required.",
+        },
+        {
+          name: "rewardType",
+          type: "string",
+          defaultValue: "discount",
+          description: "Reward type. Values: discount / gift_card / store_credit.",
+        },
+      ],
+      bodyExample: `{
+  "customerId": "1234567890",
+  "shop": "${shop}",
+  "pointsToRedeem": 100,
+  "rewardType": "discount"
+}`,
+    },
+    {
+      title: "Hydrogen protected balance",
+      method: "GET or POST",
+      description:
+        "Token-protected balance endpoint for Hydrogen or other private headless storefronts. Send Authorization: Bearer <token>.",
+      url: getEndpointUrl(
+        apiBaseUrl,
+        "/api/hydrogen/loyalty-balance",
+        `?customerId={customer_id}&${shopQuery}&surface=hydrogen`,
+      ),
+      exampleUrl: getEndpointUrl(
+        apiBaseUrl,
+        "/api/hydrogen/loyalty-balance",
+        `?customerId=1234567890&${shopQuery}&surface=hydrogen`,
+      ),
+      parameters: [
+        {
+          name: "Authorization",
+          type: "header",
+          defaultValue: "-",
+          description: "Bearer token from HYDROGEN_LOYALTY_API_TOKEN.",
+        },
+        {
+          name: "customerId",
+          type: "string",
+          defaultValue: "-",
+          description: "Shopify customer ID or Customer GID. Required.",
+        },
+        {
+          name: "shop",
+          type: "string",
+          defaultValue: "-",
+          description: "Your Shopify store domain. Required.",
+        },
+      ],
+    },
+    {
+      title: "Hydrogen protected reward history",
+      method: "GET",
+      description:
+        "Token-protected reward activity endpoint for Hydrogen account pages and private customer portals.",
+      url: getEndpointUrl(
+        apiBaseUrl,
+        "/api/hydrogen/customer-reward-history",
+        `?customerId={customer_id}&${shopQuery}`,
+      ),
+      exampleUrl: getEndpointUrl(
+        apiBaseUrl,
+        "/api/hydrogen/customer-reward-history",
+        `?customerId=1234567890&${shopQuery}`,
+      ),
+      parameters: [
+        {
+          name: "Authorization",
+          type: "header",
+          defaultValue: "-",
+          description: "Bearer token from HYDROGEN_LOYALTY_API_TOKEN.",
+        },
+        {
+          name: "customerId",
+          type: "string",
+          defaultValue: "-",
+          description: "Shopify customer ID or Customer GID. Required.",
+        },
+        {
+          name: "shop",
+          type: "string",
+          defaultValue: "-",
+          description: "Your Shopify store domain. Required.",
+        },
+      ],
+    },
+    {
+      title: "Hydrogen protected redeem",
+      method: "POST",
+      description:
+        "Token-protected redemption endpoint for private Hydrogen checkout or account flows.",
+      url: getEndpointUrl(apiBaseUrl, "/api/hydrogen/redeem-points"),
+      exampleUrl: getEndpointUrl(apiBaseUrl, "/api/hydrogen/redeem-points"),
+      parameters: [
+        {
+          name: "Authorization",
+          type: "header",
+          defaultValue: "-",
+          description: "Bearer token from HYDROGEN_LOYALTY_API_TOKEN.",
+        },
+        {
+          name: "customerId",
+          type: "string",
+          defaultValue: "-",
+          description: "App customer ID, Shopify customer ID, or Customer GID. Required.",
+        },
+        {
+          name: "shop",
+          type: "string",
+          defaultValue: "-",
+          description: "Your Shopify store domain. Required for Shopify customer IDs.",
+        },
+        {
+          name: "pointsToRedeem",
+          type: "number",
+          defaultValue: "-",
+          description: "Points to redeem. Required.",
+        },
+        {
+          name: "rewardType",
+          type: "string",
+          defaultValue: "discount",
+          description: "Reward type. Values: discount / gift_card / store_credit.",
+        },
+      ],
+      bodyExample: `{
+  "customerId": "1234567890",
+  "shop": "${shop}",
+  "pointsToRedeem": 100,
+  "rewardType": "discount"
+}`,
+    },
+  ];
+}
+
+function buildIframeWidgetSections(apiBaseUrl, shop) {
+  const proxyUrl = `${apiBaseUrl}/api/loyalty-iframe?shop=${encodeURIComponent(
+    shop,
+  )}&customerId={customer_id}`;
+  const floatingProxyUrl = `${apiBaseUrl}/api/loyalty-iframe?shop=${encodeURIComponent(
+    shop,
+  )}&customerId={customer_id}&surface=floating`;
+  const customerAccountUrl = `${apiBaseUrl}/api/loyalty-iframe?shop=${encodeURIComponent(
+    shop,
+  )}&customerId={customer_id}&surface=account`;
+
+  return [
+    {
+      title: "Theme loyalty iframe",
+      description:
+        "Ready-made loyalty UI for Shopify themes and storefront pages. Replace {customer_id} with the Shopify customer ID.",
+      embedUrl: proxyUrl,
+      iframeHtml: `<iframe
+  src="${proxyUrl}"
+  style="width: 100%; height: 520px; border: 0; border-radius: 8px; display: block;"
+  title="Loyalty rewards"
+></iframe>`,
+      details:
+        "Use this when you need the standard loyalty iframe.",
+    },
+    {
+      title: "Floating rewards iframe",
+      description:
+        "Iframe version of the floating Rewards button and panel. Replace {customer_id} with the Shopify customer ID.",
+      embedUrl: floatingProxyUrl,
+      iframeHtml: `<div id="loyalty-floating-iframe-wrapper" style="position: fixed; right: 0; bottom: 0; z-index: 2147483000; width: min(220px, 100vw); height: 92px; pointer-events: none;">
+  <iframe
+    id="loyalty-floating-iframe"
+    src="${floatingProxyUrl}"
+    style="width: 100%; height: 100%; border: 0; background: transparent; pointer-events: auto;"
+    title="Floating loyalty rewards"
+  ></iframe>
+</div>
+<script>
+  window.addEventListener("message", function(event) {
+    if (event.data && event.data.type === "loyalty-floating-iframe-state") {
+      var wrapper = document.getElementById("loyalty-floating-iframe-wrapper");
+      var iframe = document.getElementById("loyalty-floating-iframe");
+      if (!wrapper || !iframe || iframe.contentWindow !== event.source) return;
+      wrapper.style.width = event.data.open ? "min(420px, 100vw)" : "min(220px, 100vw)";
+      wrapper.style.height = event.data.open ? "min(720px, 100vh)" : "92px";
+    }
+  });
+</script>`,
+      details:
+        "Use this when you need the floating Rewards launcher as an iframe on the storefront.",
+    },
+    {
+      title: "Customer account iframe wallet",
+      description:
+        "Iframe-rendered customer account wallet for store-credit loyalty pages. Replace {customer_id} with the authenticated customer ID.",
+      embedUrl: customerAccountUrl,
+      iframeHtml: `<iframe
+  src="${customerAccountUrl}"
+  style="width: 100%; height: 520px; border: 0; border-radius: 8px; display: block;"
+  title="Customer account loyalty wallet"
+></iframe>`,
+      details:
+        "Customer account UI extensions cannot embed raw iframe HTML directly, so use this URL from supported storefronts or the customer-account iframe link mode.",
+    },
+  ];
 }
 
 /* eslint-disable react/prop-types */
@@ -353,7 +959,131 @@ function InfoIcon({ tooltip }) {
   );
 }
 
-function RewardTierOptions({ errors, initialRows, rewardType }) {
+function HeadlessApiEndpoint({ endpoint, initiallyOpen = false }) {
+  const [copiedValue, setCopiedValue] = useState(null);
+
+  const copyValue = async (value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedValue(value);
+      window.setTimeout(() => setCopiedValue(null), 1600);
+    } catch {
+      setCopiedValue(null);
+    }
+  };
+
+  return (
+    <section className="api-endpoint">
+      <div className="api-endpoint-heading">
+        <div>
+          <h3>{endpoint.title}</h3>
+          <p>{endpoint.description}</p>
+        </div>
+        <span className="method-pill">{endpoint.method}</span>
+      </div>
+
+      <div className="api-url-row">
+        <code>{endpoint.url}</code>
+        <s-button type="button" onClick={() => copyValue(endpoint.url)}>
+          {copiedValue === endpoint.url ? "Copied" : "Copy API URL"}
+        </s-button>
+      </div>
+
+      <details className="api-details" open={initiallyOpen}>
+        <summary>Query and body parameters</summary>
+        <div className="api-parameter-table" role="table">
+          <div className="api-table-row api-table-head" role="row">
+            <span role="columnheader">Parameter</span>
+            <span role="columnheader">Type</span>
+            <span role="columnheader">Default</span>
+            <span role="columnheader">Description</span>
+          </div>
+          {endpoint.parameters.map((parameter) => (
+            <div className="api-table-row" role="row" key={parameter.name}>
+              <span role="cell">
+                <code>{parameter.name}</code>
+              </span>
+              <span role="cell">{parameter.type}</span>
+              <span role="cell">{parameter.defaultValue}</span>
+              <span role="cell">{parameter.description}</span>
+            </div>
+          ))}
+        </div>
+
+        {endpoint.bodyExample ? (
+          <div className="api-example-block">
+            <div className="api-example-heading">
+              <span>Example POST body</span>
+              <s-button
+                type="button"
+                onClick={() => copyValue(endpoint.bodyExample)}
+              >
+                {copiedValue === endpoint.bodyExample ? "Copied" : "Copy"}
+              </s-button>
+            </div>
+            <pre>{endpoint.bodyExample}</pre>
+          </div>
+        ) : null}
+
+        <div className="api-example-block">
+          <div className="api-example-heading">
+            <span>Example request</span>
+            <s-button
+              type="button"
+              onClick={() => copyValue(endpoint.exampleUrl)}
+            >
+              {copiedValue === endpoint.exampleUrl ? "Copied" : "Copy"}
+            </s-button>
+          </div>
+          <code>{endpoint.exampleUrl}</code>
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function IframeWidgetCard({ widget, initiallyOpen = false }) {
+  const [copiedValue, setCopiedValue] = useState(null);
+
+  const copyValue = async (value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedValue(value);
+      window.setTimeout(() => setCopiedValue(null), 1600);
+    } catch {
+      setCopiedValue(null);
+    }
+  };
+
+  return (
+    <section className="iframe-widget-card">
+      <div className="iframe-widget-heading">
+        <div>
+          <h3>{widget.title}</h3>
+          <p>{widget.description}</p>
+        </div>
+      </div>
+
+      <details className="api-details" open={initiallyOpen}>
+        <summary>Iframe HTML</summary>
+        <div className="api-example-block">
+          <div className="api-example-heading">
+            <span>{widget.details}</span>
+            <s-button
+              type="button"
+              onClick={() => copyValue(widget.iframeHtml)}
+            >
+              {copiedValue === widget.iframeHtml ? "Copied" : "Copy iframe code"}
+            </s-button>
+          </div>
+          <pre>{widget.iframeHtml}</pre>
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function RewardTierOptions({ currencyCode, errors, initialRows, rewardType }) {
   const config = REWARD_FIELD_CONFIG[rewardType];
   const [rewardRows, setRewardRows] = useState(initialRows);
   const activeRewardCount = rewardRows.filter(
@@ -420,7 +1150,9 @@ function RewardTierOptions({ errors, initialRows, rewardType }) {
         </div>
         <div>
           <span>{config.amountSummaryLabel}</span>
-          <strong>{formatNumber(rewardSummary.totalRewardValue)}</strong>
+          <strong>
+            {formatCurrency(rewardSummary.totalRewardValue, currencyCode)}
+          </strong>
         </div>
       </div>
 
@@ -483,19 +1215,55 @@ function RewardTierOptions({ errors, initialRows, rewardType }) {
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
+  const apiBaseUrl = await getSettingsApiBaseUrl(request);
 
-  const planShop = await syncShopPlan(session.shop, admin);
-  const { settings } = await getLoyaltySettings(session.shop);
-  const checkoutAvailable = canUseCheckoutIntegration(planShop);
+  const {
+    shop: planShop,
+    settings: savedSettings,
+    checkoutAvailable,
+    effectiveIntegration,
+    planSyncError,
+  } = await ensurePlanAwareLoyaltySetup(session.shop, admin);
+  const settings = await mergeSavedIframeAppearance(savedSettings, planShop.id);
+  let currencyCode = "USD";
+
+  try {
+    const currencyResponse = await admin.graphql(`#graphql
+      query LoyaltySettingsShopCurrency {
+        shop {
+          currencyCode
+        }
+      }
+    `);
+    const currencyData = await currencyResponse.json();
+    currencyCode = currencyData.data?.shop?.currencyCode || currencyCode;
+  } catch (error) {
+    logError("settings:shop-currency", error, { shop: session.shop });
+  }
+
+  if (planSyncError) {
+    logError("settings:shop-plan-sync", planSyncError, {
+      shop: session.shop,
+    });
+  }
 
   return Response.json({
     settings,
+    currencyCode,
     shopPlan: {
       name: planShop.shopifyPlanName || "Unknown",
       isShopifyPlus: Boolean(planShop.isShopifyPlus),
       isPartnerDevelopment: Boolean(planShop.isPartnerDevelopment),
       checkoutAvailable,
-      effectiveIntegration: getEffectiveIntegration(planShop, settings),
+      effectiveIntegration,
+    },
+    headlessApi: {
+      apiBaseUrl,
+      shop: session.shop,
+      hydrogenTokenConfigured: Boolean(
+        process.env.HYDROGEN_LOYALTY_API_TOKEN ||
+          process.env.LOYALTY_HYDROGEN_API_TOKEN,
+      ),
     },
   });
 };
@@ -507,8 +1275,17 @@ export const action = async ({ request }) => {
 
   const values = {};
   const errors = {};
-  const planShop = await syncShopPlan(session.shop, admin);
-  const checkoutAvailable = canUseCheckoutIntegration(planShop);
+  const {
+    shop: planShop,
+    checkoutAvailable,
+    planSyncError,
+  } = await ensurePlanAwareLoyaltySetup(session.shop, admin);
+
+  if (planSyncError) {
+    logError("settings:shop-plan-sync", planSyncError, {
+      shop: session.shop,
+    });
+  }
 
   for (const field of SETTING_FIELDS) {
     const value = parsePositiveInteger(formData, field.name);
@@ -547,6 +1324,30 @@ export const action = async ({ request }) => {
   values.checkoutRedemptionEnabled = formData
     .getAll("checkoutRedemptionEnabled")
     .includes("true");
+  const checkoutRewardLimit = parseCheckoutRewardLimit(formData);
+
+  if (checkoutRewardLimit === null) {
+    errors.checkoutRewardLimit = "Enter a whole number from 1 to 20.";
+  } else {
+    values.checkoutRewardLimit = checkoutRewardLimit;
+  }
+
+  IFRAME_TEXT_FIELDS.forEach((field) => {
+    values[field.name] = normalizeTextSetting(formData, field.name);
+  });
+
+  IFRAME_COLOR_FIELDS.forEach((field) => {
+    values[field.name] = normalizeColorSetting(formData, field.name);
+  });
+  values.iframeFontFamily = normalizeFontFamilySetting(formData);
+  values.iframeCustomCss = normalizeCustomCssSetting(formData);
+  const iframeFontSize = parseIframeFontSize(formData);
+
+  if (iframeFontSize === null) {
+    errors.iframeFontSize = "Enter a whole number from 12 to 20.";
+  } else {
+    values.iframeFontSize = iframeFontSize;
+  }
 
   if (!parsedDiscountRewards.rewards || !parsedGiftCardRewards.rewards) {
     Object.assign(
@@ -606,14 +1407,20 @@ export const action = async ({ request }) => {
   let settings;
 
   try {
-    const { shop } = await getLoyaltySettings(session.shop);
-
     settings = await prisma.loyaltySetting.update({
       where: {
-        shopId: shop.id,
+        shopId: planShop.id,
       },
       data: filterLoyaltySettingData(values),
     });
+    await updateSavedIframeAppearance(planShop.id, values);
+    settings = await mergeSavedIframeAppearance(
+      {
+        ...settings,
+        ...values,
+      },
+      planShop.id,
+    );
   } catch (error) {
     logError("settings:save", error, { shop: session.shop });
 
@@ -653,7 +1460,7 @@ export const action = async ({ request }) => {
 };
 
 export default function LoyaltySettingsPage() {
-  const { settings, shopPlan } = useLoaderData();
+  const { currencyCode, settings, shopPlan, headlessApi } = useLoaderData();
 
   const actionData = useActionData();
 
@@ -684,6 +1491,20 @@ export default function LoyaltySettingsPage() {
   );
   const [selectedRewardTypePreference, setSelectedRewardTypePreference] =
     useState(() => getRewardTypePreferenceValue(values));
+  const [iframeAppearance, setIframeAppearance] = useState(() =>
+    getIframeAppearanceValues(values),
+  );
+  useEffect(() => {
+    setIframeAppearance(getIframeAppearanceValues(values));
+  }, [
+    values.iframeAccentColor,
+    values.iframeBackgroundColor,
+    values.iframeForegroundColor,
+    values.iframeBorderColor,
+    values.iframeFontFamily,
+    values.iframeFontSize,
+    values.iframeCustomCss,
+  ]);
   const rewardTypePreference = selectedRewardTypePreference;
   const showDiscountRewards = rewardTypePreference !== "gift_card";
   const showGiftCardRewards = rewardTypePreference !== "discount";
@@ -691,61 +1512,21 @@ export default function LoyaltySettingsPage() {
     currentSettings.redemptionRewards,
     rewardTypePreference,
   );
-  const firstReward = visibleRewardOptions[0];
-  const sampleOrderPoints =
-    Math.floor(250 / currentSettings.orderSpendAmount) *
-    currentSettings.orderSpendPoints;
+  const checkoutRewardLimit = normalizeCheckoutRewardLimit(
+    values.checkoutRewardLimit,
+  );
+  const headlessApiSections = buildHeadlessApiSections(
+    headlessApi.apiBaseUrl,
+    headlessApi.shop,
+  );
+  const iframeWidgetSections = buildIframeWidgetSections(
+    headlessApi.apiBaseUrl,
+    headlessApi.shop,
+  );
   const integrationLabel =
     effectiveIntegration === INTEGRATION_OPTIONS.CHECKOUT
       ? "Checkout"
       : "Theme";
-  const rules = [
-    {
-      label: "Signup",
-      value: `${formatNumber(currentSettings.signupBonusPoints)} points`,
-      description: "Credited when a customer joins loyalty.",
-      marker: "earn",
-    },
-    {
-      label: "Orders",
-      value: `${formatNumber(currentSettings.orderSpendPoints)} points / ${formatNumber(
-        currentSettings.orderSpendAmount,
-      )} spent`,
-      description: "Credited for every spend threshold reached.",
-      marker: "earn",
-    },
-    {
-      label: "Refunds",
-      value: `${formatNumber(currentSettings.refundSpendPoints)} points / ${formatNumber(
-        currentSettings.refundSpendAmount,
-      )} refunded`,
-      description: "Removed for every refund threshold reached.",
-      marker: "refund",
-    },
-    {
-      label: "Redemptions",
-      value:
-        effectiveIntegration === INTEGRATION_OPTIONS.CHECKOUT
-          ? "Checkout extension"
-          : "Theme app extension",
-      description: `Rewards redemption ${
-        (currentSettings.checkoutRedemptionEnabled ??
-        DEFAULT_LOYALTY_SETTINGS.checkoutRedemptionEnabled)
-          ? "enabled"
-          : "disabled"
-      }.`,
-      marker: redemptionEnabled ? "earn" : "paused",
-    },
-    {
-      label: "Reward type",
-      value:
-        REWARD_TYPE_CHOICES.find(
-          (choice) => choice.value === rewardTypePreference,
-        )?.label || "Both",
-      description: "Controls which reward options customers can redeem.",
-      marker: redemptionEnabled ? "earn" : "paused",
-    },
-  ];
 
   return (
     <s-page heading="Loyalty settings" inlineSize="full">
@@ -756,48 +1537,43 @@ export default function LoyaltySettingsPage() {
       ) : null}
       {errors.form ? <s-banner tone="critical">{errors.form}</s-banner> : null}
 
-      <section className="settings-hero" aria-label="Settings summary">
-        <div>
-          <span className="status-pill">
-            {redemptionEnabled ? "Rewards active" : "Rewards paused"}
-          </span>
-          <h2>Shape how points are earned, reversed, and redeemed</h2>
-          <p>
-            Tune the loyalty rules customers experience across signup, orders,
-            refunds, and reward redemptions.
-          </p>
-        </div>
+      <div className="settings-full-width">
+        <section className="settings-hero" aria-label="Settings summary">
+          <div>
+            <h2>Shape how points are earned, reversed, and redeemed</h2>
+            <p>
+              Tune the loyalty rules customers experience across signup, orders,
+              refunds, and reward redemptions.
+            </p>
+          </div>
 
-        <div className="hero-summary">
-          <div>
-            <span>Shop plan</span>
-            <strong>{currentShopPlan?.name || "Unknown"}</strong>
+          <div className="hero-summary">
+            <div>
+              <span>Shop plan</span>
+              <strong>{currentShopPlan?.name || "Unknown"}</strong>
+            </div>
+            <div>
+              <span>Active channel</span>
+              <strong>{integrationLabel}</strong>
+            </div>
+            <div>
+              <span>Reward tiers</span>
+              <strong>{formatNumber(visibleRewardOptions.length)}</strong>
+            </div>
           </div>
-          <div>
-            <span>Active channel</span>
-            <strong>{integrationLabel}</strong>
-          </div>
-          <div>
-            <span>Reward tiers</span>
-            <strong>{formatNumber(visibleRewardOptions.length)}</strong>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <div className="settings-layout">
-        <div className="settings-main-column">
-          <section
-            className="settings-panel"
-            aria-labelledby="point-rules-title"
-          >
+        <div className="settings-layout">
+          <div className="settings-rules-column">
+            <section
+              className="settings-panel"
+              aria-labelledby="point-rules-title"
+            >
             <div className="settings-panel-header">
               <div>
                 <h2 id="point-rules-title">Point rules</h2>
                 <p>Control how customers earn and lose loyalty points.</p>
               </div>
-              <s-badge tone={redemptionEnabled ? "success" : "warning"}>
-                {redemptionEnabled ? "Redemption on" : "Redemption off"}
-              </s-badge>
             </div>
 
             <Form method="post">
@@ -805,6 +1581,24 @@ export default function LoyaltySettingsPage() {
                 type="hidden"
                 name="currentRedemptionRewards"
                 value={currentSettings.redemptionRewards}
+              />
+              {IFRAME_COLOR_FIELDS.map((field) => (
+                <input
+                  key={field.name}
+                  type="hidden"
+                  name={field.name}
+                  value={iframeAppearance[field.name]}
+                />
+              ))}
+              <input
+                type="hidden"
+                name="iframeFontFamily"
+                value={iframeAppearance.iframeFontFamily}
+              />
+              <input
+                type="hidden"
+                name="iframeFontSize"
+                value={iframeAppearance.iframeFontSize}
               />
               <s-stack gap="base">
                 {RULE_GROUPS.map((group) => (
@@ -877,6 +1671,22 @@ export default function LoyaltySettingsPage() {
                       <span>{redemptionEnabled ? "On" : "Off"}</span>
                     </div>
 
+                    <div className="checkout-limit-field">
+                        <s-number-field
+                          label="Reward options shown"
+                          name="checkoutRewardLimit"
+                          min="1"
+                          max="20"
+                          step="1"
+                          inputMode="numeric"
+                          value={String(checkoutRewardLimit)}
+                          suffix="options"
+                          details="Limit how many configured reward options appear in checkout and the theme widget."
+                          error={errors.checkoutRewardLimit || undefined}
+                          required
+                        ></s-number-field>
+                    </div>
+
                     <div className="reward-type-options">
                       {REWARD_TYPE_CHOICES.map((choice) => (
                         <label
@@ -910,6 +1720,7 @@ export default function LoyaltySettingsPage() {
                     {showDiscountRewards ? (
                       <RewardTierOptions
                         key={`discount-${JSON.stringify(discountRewardRows)}`}
+                        currencyCode={currencyCode}
                         errors={errors}
                         initialRows={discountRewardRows}
                         rewardType="discount"
@@ -919,6 +1730,7 @@ export default function LoyaltySettingsPage() {
                     {showGiftCardRewards ? (
                       <RewardTierOptions
                         key={`gift_card-${JSON.stringify(giftCardRewardRows)}`}
+                        currencyCode={currencyCode}
                         errors={errors}
                         initialRows={giftCardRewardRows}
                         rewardType="gift_card"
@@ -938,6 +1750,122 @@ export default function LoyaltySettingsPage() {
                   </s-stack>
                 </section>
 
+                <section className="rule-section">
+                  <s-stack gap="base">
+                    <div className="rule-section-header">
+                      <div>
+                        <h3>Iframe appearance</h3>
+                        <p>
+                          Customize the copy and colors used by iframe embeds
+                          for theme, Hydrogen, and customer account pages.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="iframe-text-grid">
+                      {IFRAME_TEXT_FIELDS.map((field) => (
+                        <s-text-field
+                          key={field.name}
+                          label={field.label}
+                          name={field.name}
+                          value={getSettingValue(values, field.name)}
+                          details={field.details}
+                        ></s-text-field>
+                      ))}
+                    </div>
+
+                    <div className="iframe-color-grid">
+                      {IFRAME_COLOR_FIELDS.map((field) => {
+                        const value = iframeAppearance[field.name];
+
+                        return (
+                          <label className="iframe-color-field" key={field.name}>
+                            <span>{field.label}</span>
+                            <div>
+                              <input
+                                type="color"
+                                value={value}
+                                aria-label={field.label}
+                                onChange={(event) =>
+                                  setIframeAppearance((current) => ({
+                                    ...current,
+                                    [field.name]: event.target.value,
+                                  }))
+                                }
+                              />
+                              <code>{value}</code>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    <div className="iframe-font-grid">
+                      <s-select
+                        label="Font family"
+                        details="Choose from web-safe options and commonly used Google fonts."
+                        value={iframeAppearance.iframeFontFamily}
+                        onChange={(event) =>
+                          setIframeAppearance((current) => ({
+                            ...current,
+                            iframeFontFamily: event.currentTarget.value,
+                          }))
+                        }
+                        required
+                      >
+                        {IFRAME_FONT_FAMILY_OPTIONS.map((option) => (
+                          <s-option key={option.value} value={option.value}>
+                            {option.label}
+                          </s-option>
+                        ))}
+                      </s-select>
+
+                      <s-number-field
+                        label="Font size"
+                        min="12"
+                        max="20"
+                        step="1"
+                        inputMode="numeric"
+                        value={String(iframeAppearance.iframeFontSize)}
+                        suffix="px"
+                        details="Base text size for iframe widgets."
+                        error={errors.iframeFontSize || undefined}
+                        onInput={(event) =>
+                          setIframeAppearance((current) => ({
+                            ...current,
+                            iframeFontSize: event.target.value,
+                          }))
+                        }
+                        required
+                      ></s-number-field>
+                    </div>
+
+                    <label className="iframe-custom-css-field">
+                      <span>Custom CSS</span>
+                      <textarea
+                        name="iframeCustomCss"
+                        value={iframeAppearance.iframeCustomCss}
+                        rows={8}
+                        spellCheck="false"
+                        placeholder={
+                          ".gwl-floating-iframe__launcher {\n  background: #111827 !important;\n}\n\n.loyalty-points-widget--floating .loyalty-points-widget__launcher {\n  background: #111827 !important;\n}"
+                        }
+                        onChange={(event) =>
+                          setIframeAppearance((current) => ({
+                            ...current,
+                            iframeCustomCss: event.target.value,
+                          }))
+                        }
+                      />
+                      <small>
+                        Overrides iframe widgets and the theme app extension.
+                        Keep selectors specific to loyalty classes. Use 6-digit
+                        colors like #000000.
+                      </small>
+                    </label>
+                  </s-stack>
+                </section>
+
 
                 <div className="settings-actions">
                   <s-button
@@ -950,137 +1878,67 @@ export default function LoyaltySettingsPage() {
                 </div>
               </s-stack>
             </Form>
-          </section>
-        </div>
+            </section>
+          </div>
 
-        <div className="settings-side-column">
-          <section
-            className="settings-panel overview-panel"
-            aria-labelledby="program-overview-title"
-          >
+          <div className="settings-embed-column">
+            <section
+              className="settings-panel iframe-widgets-panel"
+              aria-labelledby="iframe-widgets-title"
+            >
             <div className="settings-panel-header">
               <div>
-                <h2 id="program-overview-title">Program overview</h2>
-                <p>Snapshot of the active loyalty experience.</p>
-              </div>
-              <s-badge tone={redemptionEnabled ? "success" : "warning"}>
-                {redemptionEnabled ? "Rewards visible" : "Rewards paused"}
-              </s-badge>
-            </div>
-
-            <div className="overview-grid">
-              <div>
-                <span>Signup offer</span>
-                <strong>
-                  {formatNumber(currentSettings.signupBonusPoints)} points
-                </strong>
-              </div>
-              <div>
-                <span>Earn rate</span>
-                <strong>
-                  {formatNumber(currentSettings.orderSpendPoints)} /{" "}
-                  {formatNumber(currentSettings.orderSpendAmount)} spent
-                </strong>
-              </div>
-              <div>
-                <span>Reward tiers</span>
-                <strong>{formatNumber(visibleRewardOptions.length)}</strong>
-              </div>
-              <div>
-                <span>Active channel</span>
-                <strong>{integrationLabel}</strong>
-              </div>
-            </div>
-          </section>
-
-          <section
-            className="settings-panel"
-            aria-labelledby="current-rules-title"
-          >
-            <div className="settings-panel-header">
-              <div>
-                <h2 id="current-rules-title">Current rules</h2>
-                <p>Preview of the active earning logic.</p>
+                <h2 id="iframe-widgets-title">Iframe widgets</h2>
+                <p>
+                  Ready-made loyalty UI that merchants can embed in theme
+                  blocks, custom Liquid sections, or headless storefront pages.
+                </p>
               </div>
             </div>
 
-            <div className="rule-timeline">
-              {rules.map((rule) => (
-                <div className="timeline-item" key={rule.label}>
-                  <span
-                    className={`timeline-marker timeline-marker-${rule.marker}`}
-                    aria-hidden="true"
-                  />
-                  <div>
-                    <span>{rule.label}</span>
-                    <strong>{rule.value}</strong>
-                    <p>{rule.description}</p>
-                  </div>
-                </div>
+            <div className="api-endpoint-list">
+              {iframeWidgetSections.map((widget, index) => (
+                <IframeWidgetCard
+                  key={widget.title}
+                  widget={widget}
+                  initiallyOpen={index === 0}
+                />
               ))}
             </div>
+            </section>
 
-            {visibleRewardOptions.length > 0 ? (
-              <div className="reward-list" aria-label="Reward tiers">
-                {visibleRewardOptions.map((reward) => (
-                  <div key={`${reward.type || "discount"}-${reward.points}`}>
-                    <span>{formatNumber(reward.points)} points</span>
-                    <strong>
-                      {(reward.type || "discount") === "gift_card"
-                        ? `${reward.amount} gift card`
-                        : `${reward.discount} discount`}
-                    </strong>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </section>
-
-          <section
-            className="settings-panel preview-panel"
-            aria-labelledby="customer-preview-title"
-          >
+            <section
+              className="settings-panel headless-api-panel"
+              aria-labelledby="headless-api-title"
+            >
             <div className="settings-panel-header">
               <div>
-                <h2 id="customer-preview-title">Customer preview</h2>
+                <h2 id="headless-api-title">Headless API</h2>
                 <p>
-                  How the active settings read in the storefront experience.
+                  Raw JSON endpoints for custom storefronts, Hydrogen builds,
+                  and theme integrations.
                 </p>
               </div>
             </div>
 
-            <div className="customer-preview">
-              <div className="preview-balance">
-                <span>Available points</span>
-                <strong>
-                  {formatNumber(
-                    currentSettings.signupBonusPoints + sampleOrderPoints,
-                  )}
-                </strong>
-                <p>
-                  Example customer after signup and a 250 order earns{" "}
-                  {formatNumber(sampleOrderPoints)} order points.
-                </p>
-              </div>
+            {!headlessApi.hydrogenTokenConfigured ? (
+              <s-banner tone="warning">
+                Hydrogen protected endpoints require
+                HYDROGEN_LOYALTY_API_TOKEN in the app environment.
+              </s-banner>
+            ) : null}
 
-              <div className="preview-reward">
-                <span>Next reward</span>
-                <strong>
-                  {firstReward
-                    ? `${formatNumber(firstReward.points)} points`
-                    : "No reward"}
-                </strong>
-                <p>
-                  {firstReward &&
-                  (firstReward.type || "discount") === "gift_card"
-                    ? `Redeem for a ${firstReward.amount} gift card.`
-                    : firstReward
-                      ? `Redeem for ${firstReward.discount} discount.`
-                      : "Add a reward tier to show redemption options."}
-                </p>
-              </div>
+            <div className="api-endpoint-list">
+              {headlessApiSections.map((endpoint, index) => (
+                <HeadlessApiEndpoint
+                  key={endpoint.title}
+                  endpoint={endpoint}
+                  initiallyOpen={index === 0}
+                />
+              ))}
             </div>
-          </section>
+            </section>
+          </div>
         </div>
       </div>
     </s-page>
@@ -1088,8 +1946,15 @@ export default function LoyaltySettingsPage() {
 }
 
 const settingsStyles = `
+  .settings-full-width {
+    inline-size: min(calc(100vw - 304px), 1560px);
+    margin-inline: calc((100% - min(calc(100vw - 304px), 1560px)) / 2);
+  }
+
   .settings-hero,
   .settings-hero *,
+  .settings-full-width,
+  .settings-full-width *,
   .settings-layout,
   .settings-layout * {
     box-sizing: border-box;
@@ -1161,13 +2026,12 @@ const settingsStyles = `
   }
 
   .hero-summary > div,
-  .overview-grid > div,
-  .preview-balance,
-  .preview-reward,
   .reward-tier-card,
+  .api-endpoint,
+  .iframe-widget-card,
+  .iframe-help-box,
   .redemption-toggle,
-  .rule-section,
-  .reward-list > div {
+  .rule-section {
     background: #f7f8fa;
     border: 1px solid #e3e5e8;
     border-radius: 8px;
@@ -1179,12 +2043,7 @@ const settingsStyles = `
   }
 
   .hero-summary span,
-  .overview-grid span,
-  .summary-strip span,
-  .preview-balance span,
-  .preview-reward span,
-  .timeline-item span,
-  .reward-list span {
+  .summary-strip span {
     color: #616a75;
     display: block;
     font-size: 12px;
@@ -1192,10 +2051,7 @@ const settingsStyles = `
     line-height: 16px;
   }
 
-  .hero-summary strong,
-  .overview-grid strong,
-  .preview-balance strong,
-  .preview-reward strong {
+  .hero-summary strong {
     color: #202223;
     display: block;
     font-size: 18px;
@@ -1206,15 +2062,15 @@ const settingsStyles = `
 
   .settings-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
     align-items: start;
     gap: 16px;
     padding-block-end: 24px;
     width: 100%;
   }
 
-  .settings-main-column,
-  .settings-side-column {
+  .settings-rules-column,
+  .settings-embed-column {
     display: grid;
     gap: 16px;
     min-width: 0;
@@ -1268,7 +2124,9 @@ const settingsStyles = `
   }
 
   .rule-section h3,
-  .reward-options h3 {
+  .reward-options h3,
+  .api-endpoint h3,
+  .iframe-widget-card h3 {
     color: #202223;
     font-size: 14px;
     font-weight: 650;
@@ -1278,11 +2136,36 @@ const settingsStyles = `
 
   .rule-section p,
   .reward-options p,
-  .redemption-toggle p {
+  .redemption-toggle p,
+  .api-endpoint p,
+  .iframe-widget-card p,
+  .iframe-help-box p {
     color: #616a75;
     font-size: 13px;
     line-height: 20px;
     margin: 4px 0 0;
+  }
+
+  .theme-embed-action-row {
+    align-items: center;
+    display: grid;
+    gap: 10px;
+    grid-template-columns: auto minmax(0, 1fr);
+    margin-block-start: 12px;
+  }
+
+  .theme-embed-action-row code {
+    background: #ffffff;
+    border: 1px solid #e3e5e8;
+    border-radius: 6px;
+    color: #202223;
+    display: block;
+    font-size: 12px;
+    line-height: 18px;
+    min-width: 0;
+    overflow: auto;
+    padding: 8px;
+    white-space: nowrap;
   }
 
   .rule-field-grid {
@@ -1301,6 +2184,11 @@ const settingsStyles = `
     gap: 12px;
     grid-template-columns: auto minmax(0, 1fr) auto;
     padding: 14px;
+  }
+
+  .checkout-limit-field {
+    max-width: 360px;
+    min-width: 0;
   }
 
   .redemption-toggle input {
@@ -1389,10 +2277,7 @@ const settingsStyles = `
   }
 
   .summary-strip,
-  .reward-tier-grid,
-  .overview-grid,
-  .customer-preview,
-  .reward-list {
+  .reward-tier-grid {
     display: grid;
     gap: 12px;
   }
@@ -1441,102 +2326,323 @@ const settingsStyles = `
     padding-block-start: 4px;
   }
 
-  .overview-grid,
-  .customer-preview {
-    grid-template-columns: 1fr;
+  .headless-api-panel {
+    display: grid;
+    gap: 14px;
   }
 
-  .overview-grid > div,
-  .preview-balance,
-  .preview-reward {
+  .iframe-widgets-panel {
+    display: grid;
+    gap: 14px;
+  }
+
+  .iframe-text-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .iframe-color-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .iframe-font-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) minmax(150px, 0.45fr);
+  }
+
+  .iframe-color-field {
+    background: #ffffff;
+    border: 1px solid #e3e5e8;
+    border-radius: 8px;
+    display: grid;
+    gap: 10px;
     padding: 12px;
   }
 
-  .preview-balance p,
-  .preview-reward p,
-  .timeline-item p {
-    color: #616a75;
-    font-size: 13px;
-    line-height: 20px;
-    margin: 4px 0 0;
-  }
-
-  .rule-timeline {
-    display: grid;
-    gap: 12px;
-  }
-
-  .timeline-item {
-    display: grid;
-    gap: 10px;
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .timeline-marker {
-    border-radius: 999px;
-    display: block;
-    height: 10px;
-    margin-block-start: 5px;
-    width: 10px;
-  }
-
-  .timeline-marker-earn {
-    background: #008060;
-  }
-
-  .timeline-marker-refund {
-    background: #b98900;
-  }
-
-  .timeline-marker-paused {
-    background: #8c9196;
-  }
-
-  .timeline-item strong {
+  .iframe-color-field span {
     color: #202223;
-    display: block;
-    font-size: 14px;
+    font-size: 13px;
+    font-weight: 650;
     line-height: 20px;
-    margin-block-start: 2px;
+  }
+
+  .iframe-color-field div {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+  }
+
+  .iframe-color-field input {
+    background: transparent;
+    border: 0;
+    height: 34px;
+    padding: 0;
+    width: 48px;
+  }
+
+  .iframe-color-field code {
+    color: #616a75;
+    font-size: 12px;
     overflow-wrap: anywhere;
   }
 
-  .reward-list {
-    margin-block-start: 14px;
+  .iframe-select-field {
+    background: #ffffff;
+    border: 1px solid #e3e5e8;
+    border-radius: 8px;
+    display: grid;
+    gap: 8px;
+    padding: 12px;
   }
 
-  .reward-list > div {
-    align-items: center;
+  .iframe-select-field span {
+    color: #202223;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 20px;
+  }
+
+  .iframe-select-field select,
+  .iframe-select-field input {
+    background: #ffffff;
+    border: 1px solid #babfc3;
+    border-radius: 8px;
+    color: #202223;
+    font-size: 14px;
+    min-height: 34px;
+    padding: 6px 10px;
+    width: 100%;
+  }
+
+  .iframe-select-field small {
+    color: #616a75;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .iframe-custom-css-field {
+    background: #ffffff;
+    border: 1px solid #e3e5e8;
+    border-radius: 8px;
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .iframe-custom-css-field span {
+    color: #202223;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 20px;
+  }
+
+  .iframe-custom-css-field textarea {
+    background: #ffffff;
+    border: 1px solid #babfc3;
+    border-radius: 8px;
+    color: #202223;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 18px;
+    min-height: 150px;
+    padding: 10px 12px;
+    resize: vertical;
+    width: 100%;
+  }
+
+  .iframe-custom-css-field small {
+    color: #616a75;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .iframe-help-box {
+    padding: 14px;
+  }
+
+  .iframe-help-box strong {
+    color: #202223;
+    display: block;
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .api-endpoint-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .api-endpoint {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .iframe-widget-card {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .api-endpoint-heading {
+    align-items: start;
     display: flex;
     gap: 12px;
     justify-content: space-between;
+  }
+
+  .iframe-widget-heading {
+    align-items: start;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+  }
+
+  .method-pill {
+    background: #eaf4ff;
+    border: 1px solid #b5d8ff;
+    border-radius: 999px;
+    color: #084b83;
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 16px;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+
+  .api-url-row,
+  .api-example-heading {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+  }
+
+  .api-url-row {
+    background: #ffffff;
+    border: 1px solid #dcdfe4;
+    border-radius: 8px;
+    padding: 8px;
+  }
+
+  .api-url-row code,
+  .api-example-block code,
+  .api-example-block pre {
+    color: #303030;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 18px;
+    margin: 0;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .api-details {
+    display: grid;
+    gap: 10px;
+  }
+
+  .api-details summary {
+    color: #005bd3;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 20px;
+  }
+
+  .api-parameter-table {
+    border: 1px solid #e3e5e8;
+    border-radius: 8px;
+    display: grid;
+    margin-block-start: 10px;
+    overflow: hidden;
+  }
+
+  .api-table-row {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: minmax(100px, 0.9fr) minmax(80px, 0.6fr) minmax(70px, 0.5fr) minmax(180px, 1.7fr);
     padding: 10px 12px;
   }
 
-  .reward-list strong {
+  .api-table-row + .api-table-row {
+    border-block-start: 1px solid #e3e5e8;
+  }
+
+  .api-table-row span {
+    color: #303030;
+    font-size: 12px;
+    line-height: 18px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .api-table-head {
+    background: #ffffff;
+  }
+
+  .api-table-head span {
     color: #202223;
-    font-size: 13px;
-    line-height: 20px;
-    text-align: end;
+    font-weight: 650;
+  }
+
+  .api-table-row code {
+    background: #f1f2f4;
+    border-radius: 4px;
+    color: #202223;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    padding: 1px 4px;
+  }
+
+  .api-example-block {
+    background: #ffffff;
+    border: 1px solid #e3e5e8;
+    border-radius: 8px;
+    display: grid;
+    gap: 8px;
+    margin-block-start: 10px;
+    padding: 10px;
+  }
+
+  .api-example-heading span {
+    color: #616a75;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 16px;
   }
 
   @media (max-width: 1120px) {
+    .settings-full-width {
+      inline-size: 100%;
+      margin-inline: 0;
+    }
+
     .settings-hero,
     .settings-layout {
       grid-template-columns: 1fr;
     }
 
     .hero-summary,
+    .iframe-text-grid,
+    .iframe-font-grid,
     .reward-type-options,
     .summary-strip {
       grid-template-columns: 1fr;
     }
-  }
 
-  @media (min-width: 1121px) {
-    .settings-side-column {
-      position: sticky;
-      top: 16px;
+    .iframe-color-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .settings-rules-column,
+    .settings-embed-column {
+      grid-column: auto;
+      grid-row: auto;
     }
   }
 
@@ -1548,7 +2654,11 @@ const settingsStyles = `
     }
 
     .reward-options-heading,
-    .settings-panel-header {
+    .settings-panel-header,
+    .api-endpoint-heading,
+    .iframe-widget-heading,
+    .api-url-row,
+    .api-example-heading {
       display: grid;
     }
 
@@ -1563,6 +2673,14 @@ const settingsStyles = `
     .redemption-toggle > span {
       grid-column: 2;
       width: fit-content;
+    }
+
+    .api-table-row {
+      grid-template-columns: 1fr;
+    }
+
+    .iframe-color-grid {
+      grid-template-columns: 1fr;
     }
   }
 

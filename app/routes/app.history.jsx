@@ -95,7 +95,13 @@ async function runAdminGraphql(admin, query, variables) {
 }
 
 function getOrderIdFromLog(item) {
-  return item.reward?.orderId || getMetadataValue(item.metadata, "orderId");
+  if (!["discount_applied", "gift_card_applied"].includes(item.activityType)) {
+    return null;
+  }
+
+  return (
+    getMetadataValue(item.metadata, "orderId") || item.reward?.orderId || null
+  );
 }
 
 async function loadOrderNameById(admin, orderIds) {
