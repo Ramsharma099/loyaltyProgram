@@ -165,32 +165,10 @@ function isAppProxyBaseUrl(value) {
   }
 }
 
-function isDevTunnelUrl(value) {
-  try {
-    return new URL(value).hostname.endsWith(".trycloudflare.com");
-  } catch {
-    return false;
-  }
-}
-
-function getApiBaseUrls(settings) {
-  const configuredUrl = normalizeApiBaseUrl(settings?.api_base_url);
+function getApiBaseUrls() {
   const generatedUrl = normalizeApiBaseUrl(API_BASE_URL);
-  const urls = [];
 
-  if (generatedUrl) {
-    urls.push(generatedUrl);
-  }
-
-  if (
-    configuredUrl &&
-    !isAppProxyBaseUrl(configuredUrl) &&
-    !isDevTunnelUrl(configuredUrl)
-  ) {
-    urls.push(configuredUrl);
-  }
-
-  return [...new Set(urls)];
+  return generatedUrl ? [generatedUrl] : [];
 }
 
 function buildApiUrl(apiBaseUrl, endpoint, params) {
@@ -247,7 +225,7 @@ export function CustomerAccountLoyaltyPoints() {
   const customer = useAuthenticatedAccountCustomer();
   const [proxyShopDomain, setProxyShopDomain] = useState("");
   const [isResolvingProxyBaseUrl, setIsResolvingProxyBaseUrl] = useState(true);
-  const apiBaseUrls = useMemo(() => getApiBaseUrls(settings), [settings]);
+  const apiBaseUrls = useMemo(() => getApiBaseUrls(), []);
   const apiBaseUrlsKey = apiBaseUrls.join("|");
   const accountRenderMode = getSettingValue(
     settings,

@@ -44,12 +44,6 @@ key = "requestedFreeGift"
 
 [extensions.settings]
 [[extensions.settings.fields]]
-key = "api_base_url"
-type = "single_line_text_field"
-name = "Production API base URL"
-description = "Production app URL. During shopify app dev, the current tunnel URL is used automatically."
-
-[[extensions.settings.fields]]
 key = "login_message"
 type = "single_line_text_field"
 name = "Login message"

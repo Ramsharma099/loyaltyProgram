@@ -46,16 +46,24 @@ function getRewardType(item) {
   return (
     item.reward?.rewardType ||
     getMetadataValue(item.metadata, "rewardType") ||
-    (item.activityType?.startsWith("gift_card") ? "gift_card" : "discount")
+    (item.activityType?.startsWith("store_credit")
+      ? "store_credit"
+      : item.activityType?.startsWith("gift_card")
+        ? "gift_card"
+        : "discount")
   );
 }
 
 function getRewardTypeLabel(item) {
-  return getRewardType(item) === "gift_card" ? "Gift card" : "Discount";
+  const rewardType = getRewardType(item);
+
+  if (rewardType === "store_credit") return "Store credit";
+  if (rewardType === "gift_card") return "Gift card";
+  return "Discount";
 }
 
 function getRewardTypeClass(item) {
-  return getRewardType(item) === "gift_card" ? "gift-card" : "discount";
+  return getRewardType(item).replace("_", "-");
 }
 
 function getMetadataValue(metadata, key) {
@@ -366,7 +374,9 @@ export default function HistoryPage() {
                             >
                               {getActivityLabel(item.activityType)}
                             </span>
-                            <span className={`reward-type-pill ${getRewardTypeClass(item)}`}>
+                            <span
+                              className={`reward-type-pill ${getRewardTypeClass(item)}`}
+                            >
                               {getRewardTypeLabel(item)}
                             </span>
                           </div>
@@ -586,6 +596,11 @@ const historyStyles = `
   .reward-type-pill.gift-card {
     background: #f7f5ff;
     color: #6b21a8;
+  }
+
+  .reward-type-pill.store-credit {
+    background: #ecfdf3;
+    color: #067647;
   }
 
   .activity-pill.neutral {
