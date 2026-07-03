@@ -335,7 +335,9 @@ export default function HistoryPage() {
                   {history.map((item) => {
                     const customer = item.customer || item.reward?.customer;
                     const rewardCode =
-                      item.rewardCode || item.reward?.rewardCode;
+                      getRewardType(item) === "store_credit"
+                        ? null
+                        : item.rewardCode || item.reward?.rewardCode;
                     const points =
                       item.reward?.pointsUsed ||
                       getMetadataValue(item.metadata, "pointsUsed") ||
