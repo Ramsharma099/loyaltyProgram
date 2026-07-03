@@ -1,3 +1,5 @@
+SET SESSION group_concat_max_len = 100000;
+
 SET @missing_ui_columns = (
   SELECT GROUP_CONCAT(
     CONCAT('ADD COLUMN `', desired.column_name, '` TEXT NULL')
