@@ -1,4 +1,27 @@
-# Shopify App Template - React Router
+# Loyalty Points App
+
+This repository contains a Shopify loyalty program with theme, checkout, customer-account, iframe, and Hydrogen integrations.
+
+See the [complete loyalty program documentation](docs/loyalty-program.md) for setup, architecture, merchant workflows, reward behavior, APIs, webhooks, extensions, deployment, migrations, and troubleshooting.
+
+## Quick start
+
+```bash
+npm install
+npm run setup
+npm run dev
+```
+
+## Validation
+
+```bash
+npm run typecheck
+npm run build
+```
+
+---
+
+## Original Shopify template notes
 
 This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/). It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
 
