@@ -77,12 +77,12 @@ model LoyaltySetting {
   accountAvailableLabel   String @default("Available points") @db.VarChar(500)
   accountCurrentBalance   String @default("Current balance") @db.VarChar(500)
   accountLoadingText      String @default("Loading...") @db.VarChar(500)
-  accountRedeemingText    String @default("Converting...") @db.VarChar(500)
-  accountRedeemButtonText String @default("Convert to store credit") @db.VarChar(500)
-  accountDisabledMsg      String @default("Store credit conversion is currently disabled.") @db.VarChar(500)
-  accountNotEnoughPtsMsg  String @default("Earn {remaining_points} more points to convert this amount.") @db.VarChar(500)
-  accountGiftCardMsg      String @default("Store credit added: ${amount}") @db.VarChar(500)
-  accountErrorMsg         String @default("Could not convert points to store credit") @db.VarChar(500)
+  accountRedeemingText    String @db.Text
+  accountRedeemButtonText String @db.Text
+  accountDisabledMsg      String @db.Text
+  accountNotEnoughPtsMsg  String @db.Text
+  accountGiftCardMsg      String @db.Text
+  accountErrorMsg         String @db.Text
   accountConfigErrorMsg   String @default("Loyalty API URL is not configured.") @db.VarChar(500)
 
   // Iframe Widget UI Settings

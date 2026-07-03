@@ -23,9 +23,9 @@ SET `accountErrorMsg` = 'Could not convert points to store credit'
 WHERE `accountErrorMsg` = 'Could not redeem gift card';
 
 ALTER TABLE `LoyaltySetting`
-MODIFY COLUMN `accountRedeemingText` VARCHAR(500) NOT NULL DEFAULT 'Converting...',
-MODIFY COLUMN `accountRedeemButtonText` VARCHAR(500) NOT NULL DEFAULT 'Convert to store credit',
-MODIFY COLUMN `accountDisabledMsg` VARCHAR(500) NOT NULL DEFAULT 'Store credit conversion is currently disabled.',
-MODIFY COLUMN `accountNotEnoughPtsMsg` VARCHAR(500) NOT NULL DEFAULT 'Earn {remaining_points} more points to convert this amount.',
-MODIFY COLUMN `accountGiftCardMsg` VARCHAR(500) NOT NULL DEFAULT 'Store credit added: ${amount}',
-MODIFY COLUMN `accountErrorMsg` VARCHAR(500) NOT NULL DEFAULT 'Could not convert points to store credit';
+MODIFY COLUMN `accountRedeemingText` TEXT NOT NULL,
+MODIFY COLUMN `accountRedeemButtonText` TEXT NOT NULL,
+MODIFY COLUMN `accountDisabledMsg` TEXT NOT NULL,
+MODIFY COLUMN `accountNotEnoughPtsMsg` TEXT NOT NULL,
+MODIFY COLUMN `accountGiftCardMsg` TEXT NOT NULL,
+MODIFY COLUMN `accountErrorMsg` TEXT NOT NULL;
