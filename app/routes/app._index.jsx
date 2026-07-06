@@ -1,34 +1,60 @@
 import { useLoaderData } from "react-router";
 
 import prisma from "../db.server";
+import { authenticate } from "../shopify.server";
 
-export const loader = async () => {
-  // total customers
-  const totalCustomers = await prisma.customer.count();
-
-  // total rewards
-  const totalRewards = await prisma.reward.count();
-
-  // all transactions
-  const transactions = await prisma.pointTransaction.findMany();
-
-  // total points issued
-  const totalPointsIssued = transactions
-    .filter((t) => t.transactionType === "credit")
-    .reduce((sum, t) => sum + t.points, 0);
-
-  // total redeemed
-  const totalRedeemed = transactions
-    .filter((t) => t.transactionType === "debit")
-    .reduce((sum, t) => sum + t.points, 0);
-
-  // latest customers
-  const customers = await prisma.customer.findMany({
-    orderBy: {
-      createdAt: "desc",
+export const loader = async ({ request }) => {
+  const { session } = await authenticate.admin(request);
+  const shop = await prisma.shop.findUnique({
+    where: {
+      shopDomain: session.shop,
     },
-    take: 10,
+    select: {
+      id: true,
+    },
   });
+
+  if (!shop) {
+    return Response.json({
+      totalCustomers: 0,
+      totalRewards: 0,
+      totalPointsIssued: 0,
+      totalRedeemed: 0,
+      customers: [],
+    });
+  }
+
+  const customerScope = { shopId: shop.id };
+  const transactionScope = {
+    customer: customerScope,
+  };
+  const [
+    totalCustomers,
+    totalRewards,
+    issuedAggregate,
+    redeemedAggregate,
+    customers,
+  ] = await Promise.all([
+    prisma.customer.count({ where: customerScope }),
+    prisma.reward.count({ where: { customer: customerScope } }),
+    prisma.pointTransaction.aggregate({
+      where: { ...transactionScope, transactionType: "credit" },
+      _sum: { points: true },
+    }),
+    prisma.pointTransaction.aggregate({
+      where: { ...transactionScope, transactionType: "debit" },
+      _sum: { points: true },
+    }),
+    prisma.customer.findMany({
+      where: customerScope,
+      orderBy: {
+        createdAt: "desc",
+      },
+      take: 10,
+    }),
+  ]);
+  const totalPointsIssued = issuedAggregate._sum.points || 0;
+  const totalRedeemed = redeemedAggregate._sum.points || 0;
 
   return Response.json({
     totalCustomers,
