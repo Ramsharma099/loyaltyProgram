@@ -50,7 +50,11 @@ export async function loader({context}) {
 
   return data({
     cart: cartData,
-    loyalty,
+    loyalty: {
+      ...loyalty,
+      currencyCode:
+        cartData?.cost?.totalAmount?.currencyCode || loyalty?.currencyCode,
+    },
   }, headers ? {headers} : undefined);
 }
 

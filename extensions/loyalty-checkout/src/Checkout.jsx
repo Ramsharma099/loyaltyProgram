@@ -1,4 +1,5 @@
 import "@shopify/ui-extensions/preact";
+import { useCurrency } from "@shopify/ui-extensions/checkout/preact";
 import { render } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { fetchApiJson } from "./api";
@@ -298,6 +299,7 @@ export default function extension() {
 }
 
 function Extension() {
+  const checkoutCurrency = useCurrency();
   const [settings, setSettings] = useState(shopify.settings.current);
 
   const apiBaseUrls = useMemo(() => getApiBaseUrls(), []);
@@ -309,7 +311,6 @@ function Extension() {
   const [customerId, setCustomerId] = useState(null);
 
   const [points, setPoints] = useState(0);
-  const [currencyCode, setCurrencyCode] = useState("USD");
   const [rewardOptions, setRewardOptions] = useState(DEFAULT_REWARD_OPTIONS);
   const [rewardTypePreference, setRewardTypePreference] = useState("both");
   const [discountCodes, setDiscountCodes] = useState(() =>
@@ -681,7 +682,6 @@ function Extension() {
 
         setCustomerId(data.customerId);
         setPoints(data.loyaltyPoints);
-        setCurrencyCode(data.currencyCode || "USD");
         setRewardTypePreference(
           normalizeRewardTypePreference(data.rewardTypePreference),
         );
@@ -977,10 +977,16 @@ function Extension() {
                     <s-stack gap="small">
                       <s-stack gap="none">
                         <s-text type="strong">
-                          {formatRewardLabel(reward, currencyCode)}
+                          {formatRewardLabel(
+                            reward,
+                            checkoutCurrency?.isoCode || "USD",
+                          )}
                         </s-text>
                         <s-text color="subdued" type="small">
-                        {formatRewardDescription(reward, currencyCode)}
+                        {formatRewardDescription(
+                          reward,
+                          checkoutCurrency?.isoCode || "USD",
+                        )}
                         </s-text>
                       </s-stack>
                       <s-stack direction="inline" gap="small">

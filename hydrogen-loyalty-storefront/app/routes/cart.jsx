@@ -124,7 +124,11 @@ export async function loader({context}) {
 
   return {
     cart: cartData,
-    loyalty,
+    loyalty: {
+      ...loyalty,
+      currencyCode:
+        cartData?.cost?.totalAmount?.currencyCode || loyalty?.currencyCode,
+    },
   };
 }
 

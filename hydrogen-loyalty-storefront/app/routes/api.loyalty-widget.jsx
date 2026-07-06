@@ -13,6 +13,7 @@ const PENDING_REDEMPTION_MESSAGE =
  */
 export async function loader({context}) {
   try {
+    const cartData = await context.cart.get();
     const customerId = await loadCustomerId(context.customerAccount);
 
     if (!customerId) {
@@ -22,6 +23,7 @@ export async function loader({context}) {
         isLoggedIn: false,
         loyaltyPoints: 0,
         rewardOptions: [],
+        currencyCode: cartData?.cost?.totalAmount?.currencyCode,
       });
     }
 
@@ -31,6 +33,8 @@ export async function loader({context}) {
 
     return data({
       ...loyalty,
+      currencyCode:
+        cartData?.cost?.totalAmount?.currencyCode || loyalty.currencyCode,
       success: true,
       enabled: loyalty.checkoutRedemptionEnabled !== false,
       isLoggedIn: true,
