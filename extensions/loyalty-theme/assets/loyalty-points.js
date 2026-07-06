@@ -429,7 +429,7 @@
       }
 
       applyCustomCss(data.iframeCustomCss);
-      widget.dataset.currencyCode = data.currencyCode || dataset.currencyCode || "USD";
+      widget.dataset.currencyCode = dataset.currencyCode || data.currencyCode || "USD";
       loadCustomCss(widget);
 
       if (dataset.loggedIn !== "true") return;

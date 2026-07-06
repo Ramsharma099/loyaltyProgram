@@ -10,10 +10,11 @@
 
   assign accent_color = block.settings.accent_color | default: '#111827'
   assign effective_display_mode = block.settings.display_mode
+  assign presentment_currency = cart.currency.iso_code | default: localization.country.currency.iso_code | default: shop.currency
 %}
 
 {% if effective_display_mode == 'floating_iframe' %}
-  {% capture loyalty_floating_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&surface=floating&accentColor={{ accent_color | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}{% endcapture %}
+  {% capture loyalty_floating_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&surface=floating&currencyCode={{ presentment_currency | url_encode }}&accentColor={{ accent_color | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}{% endcapture %}
   <div
     class="loyalty-points-widget loyalty-points-widget--floating-iframe"
     style="--loyalty-accent-color: {{ accent_color }}; position: fixed; z-index: 9999; right: 0; bottom: 0; width: min(220px, 100vw); height: 92px; margin: 0; pointer-events: none;"
@@ -29,7 +30,7 @@
     ></iframe>
   </div>
 {% elsif effective_display_mode == 'iframe' %}
-  {% capture loyalty_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&accentColor={{ accent_color | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}{% endcapture %}
+  {% capture loyalty_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&currencyCode={{ presentment_currency | url_encode }}&accentColor={{ accent_color | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}{% endcapture %}
   <div
     class="loyalty-points-widget loyalty-points-widget--iframe"
     style="--loyalty-accent-color: {{ accent_color }};"
@@ -51,7 +52,7 @@
   data-api-base-url="/apps/loyalty-points"
   data-balance-url="/apps/loyalty-points"
   data-shop-domain="{{ shop.permanent_domain | escape }}"
-  data-currency-code="{{ shop.currency | escape }}"
+  data-currency-code="{{ presentment_currency | escape }}"
   data-customer-id="{{ customer_id }}"
   data-logged-in="{% if customer %}true{% else %}false{% endif %}"
   data-heading="{{ block.settings.heading | escape }}"
@@ -769,7 +770,7 @@
             if (!data.success) throw new Error(data.message || 'Could not load points');
 
             applyFallbackCustomCss(data.iframeCustomCss);
-            widget.dataset.currencyCode = data.currencyCode || widget.dataset.currencyCode || 'USD';
+            widget.dataset.currencyCode = widget.dataset.currencyCode || data.currencyCode || 'USD';
 
             var points = Number(data.loyaltyPoints || 0);
             var status = widget.querySelector('[data-loyalty-status]');

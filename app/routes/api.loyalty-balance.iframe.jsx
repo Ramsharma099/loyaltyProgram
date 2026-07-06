@@ -63,6 +63,11 @@ function normalizeEmail(email) {
   return typeof email === "string" ? email.trim().toLowerCase() : "";
 }
 
+function normalizeCurrencyCode(value) {
+  const currencyCode = String(value || "").trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(currencyCode) ? currencyCode : null;
+}
+
 function sanitizeColor(value, fallback = "#008060") {
   const color = String(value || "").trim();
 
@@ -2887,6 +2892,9 @@ export const loader = async ({ request }) => {
     const shopDomain = normalizeShopDomain(url.searchParams.get("shop"));
     const customerId = getShopifyCustomerId(url.searchParams.get("customerId"));
     const customerEmail = normalizeEmail(url.searchParams.get("customerEmail"));
+    const presentmentCurrencyCode = normalizeCurrencyCode(
+      url.searchParams.get("currencyCode"),
+    );
     const showRewards = url.searchParams.get("showRewards") !== "false";
     const surface = url.searchParams.get("surface") || "theme";
     const loginUrl = getParam(url, "loginUrl", "/account/login");
@@ -2894,7 +2902,7 @@ export const loader = async ({ request }) => {
     const redeemUrl = getParam(url, "redeemUrl", "/api/redeem-points");
     const {
       customer,
-      currencyCode,
+      currencyCode: shopCurrencyCode,
       hasPendingCheckoutRedemption,
       history,
       redemptionEnabled,
@@ -2908,6 +2916,7 @@ export const loader = async ({ request }) => {
       customerEmail,
       surface,
     );
+    const currencyCode = presentmentCurrencyCode || shopCurrencyCode;
     const copy = buildIframeCopy(url, settings);
     const theme = buildIframeTheme(url, settings);
 
