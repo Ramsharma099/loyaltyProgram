@@ -19,27 +19,43 @@
     window.__loyaltyPointsFallbackBound = false;
   }
 
-  function formatRewardTitle(reward) {
-    if (reward.type === "gift_card") {
-      return reward.title || `$${reward.amount} Gift Card`;
-    }
+  function formatCurrency(value, currencyCode) {
+    const amount = Number(value || 0);
 
-    if (reward.type === "store_credit") {
-      return reward.title || `$${reward.amount} Store Credit`;
+    try {
+      return new Intl.NumberFormat("en", {
+        style: "currency",
+        currency: currencyCode || "USD",
+        currencyDisplay: "narrowSymbol",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    } catch {
+      return `${currencyCode || "USD"} ${amount.toLocaleString("en")}`;
     }
-
-    return `Discount $${reward.discount} for ${reward.points} points`;
   }
 
-  function formatRewardDescription(reward) {
-    if (reward.description) return reward.description;
-
+  function formatRewardTitle(reward, currencyCode) {
     if (reward.type === "gift_card") {
-      return `Redeem ${reward.points} points for this gift card.`;
+      return `${formatCurrency(reward.amount, currencyCode)} Gift Card`;
     }
 
     if (reward.type === "store_credit") {
-      return `Redeem ${reward.points} points for store credit.`;
+      return `${formatCurrency(reward.amount, currencyCode)} Store Credit`;
+    }
+
+    return `Discount ${formatCurrency(reward.discount, currencyCode)} for ${reward.points} points`;
+  }
+
+  function formatRewardDescription(reward, currencyCode) {
+    if (reward.description && reward.type === "discount") return reward.description;
+
+    if (reward.type === "gift_card") {
+      return `Redeem ${reward.points} points for a ${formatCurrency(reward.amount, currencyCode)} gift card.`;
+    }
+
+    if (reward.type === "store_credit") {
+      return `Redeem ${reward.points} points for ${formatCurrency(reward.amount, currencyCode)} store credit.`;
     }
 
     return `Redeem ${reward.points} points for a discount.`;
@@ -285,19 +301,19 @@
     item.classList.toggle("loyalty-points-widget__reward--applied", isApplied);
     const canRedeem = isAvailable && !hasPendingReward;
     button.disabled = !canRedeem;
-    button.setAttribute("aria-label", `Redeem ${formatRewardTitle(reward)}`);
+    button.setAttribute("aria-label", `Redeem ${formatRewardTitle(reward, widget.dataset.currencyCode)}`);
 
     appendText(
       button,
       "p",
       "loyalty-points-widget__reward-title",
-      formatRewardTitle(reward),
+      formatRewardTitle(reward, widget.dataset.currencyCode),
     );
     appendText(
       button,
       "p",
       "loyalty-points-widget__reward-description",
-      formatRewardDescription(reward),
+      formatRewardDescription(reward, widget.dataset.currencyCode),
     );
     const cta = appendText(
       button,
@@ -413,6 +429,7 @@
       }
 
       applyCustomCss(data.iframeCustomCss);
+      widget.dataset.currencyCode = data.currencyCode || dataset.currencyCode || "USD";
       loadCustomCss(widget);
 
       if (dataset.loggedIn !== "true") return;

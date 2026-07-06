@@ -993,5 +993,6 @@ async function createStoreCreditReward({ admin, customer, selectedReward }) {
   return {
     rewardCode: result.storeCreditAccountTransaction.id,
     amount: selectedReward.amount,
+    currencyCode,
   };
 }

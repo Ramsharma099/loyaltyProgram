@@ -336,42 +336,58 @@ function getRewardTypeLabel(activityType) {
   return "Discount";
 }
 
-function formatRewardTitle(reward) {
+function formatCurrency(value, currencyCode = "USD") {
+  const amount = Number(value || 0);
+
+  try {
+    return new Intl.NumberFormat("en", {
+      style: "currency",
+      currency: currencyCode,
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currencyCode} ${amount.toLocaleString("en")}`;
+  }
+}
+
+function formatRewardTitle(reward, currencyCode) {
   if (reward.type === "store_credit") {
     return reward.title || "Store credit";
   }
 
   if (reward.type === "gift_card") {
-    return reward.title || `$${reward.amount} Gift Card`;
+    return `${formatCurrency(reward.amount, currencyCode)} Gift Card`;
   }
 
-  return `Discount $${reward.discount} for ${reward.points} points`;
+  return `Discount ${formatCurrency(reward.discount, currencyCode)} for ${reward.points} points`;
 }
 
-function formatRewardDescription(reward) {
-  if (reward.description) {
+function formatRewardDescription(reward, currencyCode) {
+  if (reward.description && reward.type !== "gift_card") {
     return reward.description;
   }
 
   if (reward.type === "store_credit") {
-    return `Redeem ${formatNumber(reward.points)} points for $${reward.amount} store credit.`;
+    return `Redeem ${formatNumber(reward.points)} points for ${formatCurrency(reward.amount, currencyCode)} store credit.`;
   }
 
   return reward.type === "gift_card"
-    ? `Redeem ${formatNumber(reward.points)} points for this gift card.`
+    ? `Redeem ${formatNumber(reward.points)} points for a ${formatCurrency(reward.amount, currencyCode)} gift card.`
     : `Redeem ${formatNumber(reward.points)} points for a discount.`;
 }
 
-function formatRewardValue(reward) {
+function formatRewardValue(reward, currencyCode) {
   if (reward.type === "gift_card") {
-    return `$${Number(reward.amount || 0).toLocaleString()} gift card`;
+    return `${formatCurrency(reward.amount, currencyCode)} gift card`;
   }
 
   if (reward.type === "store_credit") {
-    return `$${Number(reward.amount || 0).toLocaleString()} store credit`;
+    return `${formatCurrency(reward.amount, currencyCode)} store credit`;
   }
 
-  return `$${Number(reward.discount || 0).toLocaleString()} off`;
+  return `${formatCurrency(reward.discount, currencyCode)} off`;
 }
 
 function getRewardKey(reward) {
@@ -399,19 +415,11 @@ function normalizeStoreCreditReward(reward) {
   };
 }
 
-function formatCurrency(value) {
+function formatHistoryAmount(value, currencyCode) {
   const amount = Number(value);
 
   return Number.isFinite(amount) && amount > 0
-    ? `$${amount.toLocaleString()}`
-    : "$0";
-}
-
-function formatHistoryAmount(value) {
-  const amount = Number(value);
-
-  return Number.isFinite(amount) && amount > 0
-    ? `$${amount.toLocaleString()}`
+    ? formatCurrency(amount, currencyCode)
     : "-";
 }
 
@@ -493,6 +501,32 @@ async function getStoreCreditBalance(shopDomain, shopifyCustomerId) {
       shopifyCustomerId,
     });
     return null;
+  }
+}
+
+async function getShopCurrencyCode(shopDomain) {
+  if (!shopDomain) {
+    return "USD";
+  }
+
+  try {
+    const { admin } = await unauthenticated.admin(shopDomain);
+    const data = await runShopifyGraphql(
+      admin,
+      `#graphql
+        query IframeShopCurrency {
+          shop {
+            currencyCode
+          }
+        }
+      `,
+      { operation: "Load iframe shop currency" },
+    );
+
+    return data.shop?.currencyCode || "USD";
+  } catch (error) {
+    logError("loyalty-iframe:shop-currency", error, { shopDomain });
+    return "USD";
   }
 }
 
@@ -623,8 +657,10 @@ async function loadWidgetData(shopDomain, customerId, customerEmail, surface) {
     surface === "floating" && customer
       ? await getPendingCheckoutRedemption(customer.id)
       : null;
+  const currencyCode = await getShopCurrencyCode(shopDomain);
 
   return {
+    currencyCode,
     customer,
     hasPendingCheckoutRedemption: Boolean(pendingCheckoutRedemption),
     history: history.map((item) => ({
@@ -656,7 +692,7 @@ async function loadWidgetData(shopDomain, customerId, customerEmail, surface) {
   };
 }
 
-function renderRewardList(rewards, points, redemptionEnabled, copy) {
+function renderRewardList(rewards, points, redemptionEnabled, copy, currencyCode) {
   if (!redemptionEnabled) {
     return `<p class="gwl-loyalty-iframe__message">Rewards redemption is currently paused.</p>`;
   }
@@ -681,10 +717,10 @@ function renderRewardList(rewards, points, redemptionEnabled, copy) {
                 ${available ? "" : "disabled"}
               >
                 <span class="gwl-loyalty-iframe__reward-title">${escapeHtml(
-                  formatRewardTitle(reward),
+                  formatRewardTitle(reward, currencyCode),
                 )}</span>
                 <span class="gwl-loyalty-iframe__reward-description">${escapeHtml(
-                  formatRewardDescription(reward),
+                  formatRewardDescription(reward, currencyCode),
                 )}</span>
                 <span class="gwl-loyalty-iframe__reward-cta">${
                   available
@@ -715,7 +751,7 @@ function formatHistoryDate(value) {
   }
 }
 
-function renderAccountHistoryRows(history, noHistoryMessage) {
+function renderAccountHistoryRows(history, noHistoryMessage, currencyCode) {
   if (!history.length) {
     return `
       <div class="gwl-account-loyalty__empty">
@@ -780,7 +816,7 @@ function renderAccountHistoryRows(history, noHistoryMessage) {
                       formatPoints(item.pointsUsed),
                     )}</td>
                     <td data-label="Amount">${escapeHtml(
-                      formatHistoryAmount(item.discountAmount),
+                      formatHistoryAmount(item.discountAmount, currencyCode),
                     )}</td>
                     <td data-label="Order">${escapeHtml(
                       item.orderName || item.orderId || "-",
@@ -831,6 +867,7 @@ function renderAccountHistoryRows(history, noHistoryMessage) {
 function renderAccountIframeDocument({
   appCustomerId,
   copy,
+  currencyCode,
   customerId,
   history,
   loginUrl,
@@ -859,11 +896,16 @@ function renderAccountIframeDocument({
   const selectedCreditAmount = storeCreditReward?.amount || 0;
   const currentStoreCreditAmount = Number(storeCreditBalance?.amount || 0);
   const conversionText = storeCreditReward
-    ? `${formatNumber(storeCreditReward.points)} points = $${formatNumber(
+    ? `${formatNumber(storeCreditReward.points)} points = ${formatCurrency(
         storeCreditReward.amount,
+        currencyCode,
       )} store credit`
     : "";
-  const historyMarkup = renderAccountHistoryRows(history, copy.noHistoryMessage);
+  const historyMarkup = renderAccountHistoryRows(
+    history,
+    copy.noHistoryMessage,
+    currencyCode,
+  );
 
   return `<!doctype html>
 <html lang="en">
@@ -1374,13 +1416,13 @@ function renderAccountIframeDocument({
                     <div class="gwl-account-loyalty__stat gwl-account-loyalty__stat--primary">
                       <span>Ready to convert</span>
                       <strong data-account-ready-credit>${escapeHtml(
-                        formatCurrency(readyCreditAmount),
+                        formatCurrency(readyCreditAmount, currencyCode),
                       )}</strong>
                     </div>
                     <div class="gwl-account-loyalty__stat">
                       <span>Current store credit</span>
                       <strong data-account-current-credit>${escapeHtml(
-                        formatCurrency(currentStoreCreditAmount),
+                        formatCurrency(currentStoreCreditAmount, currencyCode),
                       )}</strong>
                     </div>
                     ${
@@ -1409,7 +1451,7 @@ function renderAccountIframeDocument({
                             <p>${escapeHtml(conversionText)}</p>
                           </div>
                           <span class="gwl-account-loyalty__credit-pill">Available store credit: <span data-account-current-credit-inline>${escapeHtml(
-                            formatCurrency(currentStoreCreditAmount),
+                            formatCurrency(currentStoreCreditAmount, currencyCode),
                           )}</span></span>
                         </div>
                         <form class="gwl-account-loyalty__redeem-form" data-account-store-credit-form>
@@ -1436,7 +1478,7 @@ function renderAccountIframeDocument({
                           <div class="gwl-account-loyalty__preview">
                             <span>Store credit value</span>
                             <strong data-account-preview-credit>${escapeHtml(
-                              formatCurrency(selectedCreditAmount),
+                              formatCurrency(selectedCreditAmount, currencyCode),
                             )}</strong>
                           </div>
                           <button class="gwl-account-loyalty__submit" type="submit" data-account-submit ${
@@ -1498,7 +1540,18 @@ function renderAccountIframeDocument({
 
         function formatMoney(value) {
           const amount = Number(value);
-          return "$" + (Number.isFinite(amount) && amount > 0 ? amount.toLocaleString() : "0");
+          try {
+            return new Intl.NumberFormat("en", {
+              style: "currency",
+              currency: ${JSON.stringify(currencyCode)},
+              currencyDisplay: "narrowSymbol",
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 2
+            }).format(Number.isFinite(amount) ? amount : 0);
+          } catch {
+            return ${JSON.stringify(currencyCode)} + " " +
+              (Number.isFinite(amount) ? amount.toLocaleString("en") : "0");
+          }
         }
 
         function setNotice(message, isError) {
@@ -1777,6 +1830,7 @@ function renderFloatingRewardItems(
   points,
   hasPendingCheckoutRedemption,
   copy,
+  currencyCode,
 ) {
   if (!rewards.length) {
     return `<p class="gwl-floating-iframe__message">${escapeHtml(
@@ -1804,14 +1858,14 @@ function renderFloatingRewardItems(
                 data-floating-reward='${escapeAttr(JSON.stringify(reward))}'
                 data-reward-key="${escapeAttr(getRewardKey(reward))}"
                 ${canRedeem && !hasPendingCheckoutRedemption ? "" : "disabled"}
-                aria-label="Redeem ${escapeAttr(formatRewardTitle(reward))}"
+                aria-label="Redeem ${escapeAttr(formatRewardTitle(reward, currencyCode))}"
               >
                 <span class="gwl-floating-iframe__reward-main">
                   <span>
-                    <strong>${escapeHtml(formatRewardTitle(reward))}</strong>
-                    <span>${escapeHtml(formatRewardDescription(reward))}</span>
+                    <strong>${escapeHtml(formatRewardTitle(reward, currencyCode))}</strong>
+                    <span>${escapeHtml(formatRewardDescription(reward, currencyCode))}</span>
                   </span>
-                  <em>${escapeHtml(formatRewardValue(reward))}</em>
+                  <em>${escapeHtml(formatRewardValue(reward, currencyCode))}</em>
                 </span>
                 <span class="gwl-floating-iframe__reward-meta">
                   <small>${formatNumber(rewardPoints)} points</small>
@@ -1829,6 +1883,7 @@ function renderFloatingRewardItems(
 function renderFloatingIframeDocument({
   appCustomerId,
   copy,
+  currencyCode,
   customerId,
   hasPendingCheckoutRedemption,
   loginUrl,
@@ -1863,12 +1918,14 @@ function renderFloatingIframeDocument({
     points,
     hasPendingCheckoutRedemption,
     copy,
+    currencyCode,
   );
   const allRewardItems = renderFloatingRewardItems(
     rewards,
     points,
     hasPendingCheckoutRedemption,
     copy,
+    currencyCode,
   );
 
   return `<!doctype html>
@@ -2245,7 +2302,7 @@ function renderFloatingIframeDocument({
                     ? `
                       <div class="gwl-floating-iframe__next">
                         <span>Next reward</span>
-                        <strong>${escapeHtml(formatRewardTitle(nextReward))}</strong>
+                        <strong>${escapeHtml(formatRewardTitle(nextReward, currencyCode))}</strong>
                         <small>${formatNumber(
                           Number(nextReward.points || 0) - points,
                         )} more points needed</small>
@@ -2466,6 +2523,7 @@ function renderFloatingIframeDocument({
 function renderIframeDocument({
   appCustomerId,
   copy,
+  currencyCode,
   customerId,
   loginUrl,
   points,
@@ -2484,7 +2542,7 @@ function renderIframeDocument({
   );
   const rewardsMarkup =
     loggedIn && showRewards
-      ? renderRewardList(rewardOptions, points, redemptionEnabled, copy)
+      ? renderRewardList(rewardOptions, points, redemptionEnabled, copy, currencyCode)
       : "";
 
   return `<!doctype html>
@@ -2836,6 +2894,7 @@ export const loader = async ({ request }) => {
     const redeemUrl = getParam(url, "redeemUrl", "/api/redeem-points");
     const {
       customer,
+      currencyCode,
       hasPendingCheckoutRedemption,
       history,
       redemptionEnabled,
@@ -2867,6 +2926,7 @@ export const loader = async ({ request }) => {
         ? renderAccountIframeDocument({
             appCustomerId: customer?.id,
             copy,
+            currencyCode,
             customerId,
             history,
             loginUrl,
@@ -2883,6 +2943,7 @@ export const loader = async ({ request }) => {
           ? renderFloatingIframeDocument({
               appCustomerId: customer?.id,
               copy,
+              currencyCode,
               customerId,
               hasPendingCheckoutRedemption,
               loginUrl,
@@ -2897,6 +2958,7 @@ export const loader = async ({ request }) => {
         : renderIframeDocument({
             appCustomerId: customer?.id,
             copy,
+            currencyCode,
             customerId,
             loginUrl,
             points,

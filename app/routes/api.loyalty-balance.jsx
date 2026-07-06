@@ -171,6 +171,32 @@ async function getStoreCreditBalance(shopDomain, shopifyCustomerId) {
   }
 }
 
+async function getShopCurrencyCode(shopDomain) {
+  if (!shopDomain) {
+    return "USD";
+  }
+
+  try {
+    const { admin } = await unauthenticated.admin(shopDomain);
+    const data = await runShopifyGraphql(
+      admin,
+      `#graphql
+        query LoyaltyBalanceShopCurrency {
+          shop {
+            currencyCode
+          }
+        }
+      `,
+      { operation: "Load loyalty shop currency" },
+    );
+
+    return data.shop?.currencyCode || "USD";
+  } catch (error) {
+    logError("loyalty-balance:shop-currency", error, { shopDomain });
+    return "USD";
+  }
+}
+
 function isMissingLoyaltySettingFieldError(error) {
   const message = String(error?.message || "");
 
@@ -431,6 +457,7 @@ async function getShopIntegrationStatus(shopDomain, surface) {
 async function getLoyaltyBalance(customerId, shop, surface) {
   const shopifyCustomerId = getShopifyCustomerId(customerId);
   const shopDomain = normalizeShopDomain(shop);
+  const currencyCode = await getShopCurrencyCode(shopDomain);
 
   if (!shopifyCustomerId) {
     const integrationStatus = await getShopIntegrationStatus(
@@ -445,6 +472,7 @@ async function getLoyaltyBalance(customerId, shop, surface) {
       success: true,
       customerId: null,
       loyaltyPoints: 0,
+      currencyCode,
       storeCreditReward,
       ...integrationStatus,
       ...textSettings,
@@ -466,6 +494,7 @@ async function getLoyaltyBalance(customerId, shop, surface) {
       success: true,
       customerId: null,
       loyaltyPoints: 0,
+      currencyCode,
       storeCreditReward,
       ...integrationStatus,
       ...textSettings,
@@ -507,6 +536,7 @@ async function getLoyaltyBalance(customerId, shop, surface) {
     success: true,
     customerId: customer.id,
     loyaltyPoints: customer.loyaltyPoints,
+    currencyCode,
     rewardOptions: surfaceRewardOptions,
     pendingCheckoutRedemption,
     hasPendingCheckoutRedemption: Boolean(pendingCheckoutRedemption),

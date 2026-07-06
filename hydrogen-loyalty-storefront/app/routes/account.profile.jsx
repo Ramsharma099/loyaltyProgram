@@ -270,7 +270,10 @@ async function redeemAccountStoreCredit({context, customerAccount, form}) {
       success: true,
       message:
         redemption?.message ||
-        `Store credit added: $${Number(redemption?.reward?.amount || 0).toLocaleString()}`,
+        `Store credit added: ${formatCurrency(
+          redemption?.reward?.amount,
+          redemption?.reward?.currencyCode,
+        )}`,
     });
   } catch (error) {
     console.error('[hydrogen-account-loyalty] Could not redeem store credit', error);
@@ -322,6 +325,8 @@ function AccountLoyaltyPanel({
     selectedPoints % pointStep === 0 &&
     selectedPoints <= points;
   const storeCreditBalance = Number(loyalty?.storeCreditBalance?.amount || 0);
+  const currencyCode =
+    loyalty?.storeCreditBalance?.currencyCode || loyalty?.currencyCode || 'USD';
   const convertibleCreditAmount = storeCreditReward
     ? Math.floor(points / storeCreditReward.points) * storeCreditReward.amount
     : 0;
@@ -342,10 +347,10 @@ function AccountLoyaltyPanel({
   const conversionText = storeCreditReward
     ? formatTemplate(
         loyalty?.accountConversionRateText ||
-          '{points} points = ${amount} store credit',
+          '{points} points = {amount} store credit',
         {
           points: storeCreditReward.points.toLocaleString(),
-          amount: storeCreditReward.amount.toLocaleString(),
+          amount: formatCurrency(storeCreditReward.amount, currencyCode),
         },
       )
     : '';
@@ -413,11 +418,11 @@ function AccountLoyaltyPanel({
             <div className="account-loyalty__mini-stats">
               <div className="account-loyalty__stat account-loyalty__stat--primary">
                 <span>Ready to convert</span>
-                <strong>${convertibleCreditAmount.toLocaleString()}</strong>
+                <strong>{formatCurrency(convertibleCreditAmount, currencyCode)}</strong>
               </div>
               <div className="account-loyalty__stat">
                 <span>Current store credit</span>
-                <strong>{storeCreditBalance.toLocaleString()}</strong>
+                <strong>{formatCurrency(storeCreditBalance, currencyCode)}</strong>
               </div>
               {storeCreditReward ? (
                 <div className="account-loyalty__stat">
@@ -436,7 +441,7 @@ function AccountLoyaltyPanel({
                   <p>{conversionText}</p>
                 </div>
                 <span className="account-loyalty__credit-pill">
-                  Available store credit: {storeCreditBalance.toLocaleString()}
+                  Available store credit: {formatCurrency(storeCreditBalance, currencyCode)}
                 </span>
               </div>
               <Form method="post" className="account-loyalty__redeem-form">
@@ -481,7 +486,7 @@ function AccountLoyaltyPanel({
                 </div>
                 <div className="account-loyalty__preview">
                   <span>Store credit value</span>
-                  <strong>${selectedCreditAmount.toLocaleString()}</strong>
+                  <strong>{formatCurrency(selectedCreditAmount, currencyCode)}</strong>
                 </div>
                 <button
                   className="account-loyalty__submit"
@@ -507,13 +512,13 @@ function AccountLoyaltyPanel({
           )}
         </div>
       ) : (
-        <RewardHistory history={history} />
+        <RewardHistory history={history} currencyCode={currencyCode} />
       )}
     </section>
   );
 }
 
-function RewardHistory({history}) {
+function RewardHistory({history, currencyCode}) {
   const rows = useMemo(() => history || [], [history]);
   const [page, setPage] = useState(1);
   const pageCount = Math.max(1, Math.ceil(rows.length / REWARD_HISTORY_PAGE_SIZE));
@@ -592,7 +597,9 @@ function RewardHistory({history}) {
                     <code>{formatRewardCode(item)}</code>
                   </td>
                   <td data-label="Points">{formatPoints(item.pointsUsed)}</td>
-                  <td data-label="Amount">{formatAmount(item.discountAmount)}</td>
+                  <td data-label="Amount">
+                    {formatAmount(item.discountAmount, currencyCode)}
+                  </td>
                   <td data-label="Order">{item.orderName || item.orderId || '-'}</td>
                   <td data-label="Message" className="account-loyalty__history-message">
                     {item.message || '-'}
@@ -676,9 +683,27 @@ function formatDate(value) {
   });
 }
 
-function formatAmount(value) {
+function formatCurrency(value, currencyCode = 'USD') {
+  const amount = Number(value || 0);
+
+  try {
+    return new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: currencyCode || 'USD',
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currencyCode || 'USD'} ${amount.toLocaleString('en')}`;
+  }
+}
+
+function formatAmount(value, currencyCode) {
   const amount = Number(value);
-  return Number.isFinite(amount) && amount > 0 ? `$${amount.toLocaleString()}` : '-';
+  return Number.isFinite(amount) && amount > 0
+    ? formatCurrency(amount, currencyCode)
+    : '-';
 }
 
 function formatPoints(value) {

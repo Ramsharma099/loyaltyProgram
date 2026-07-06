@@ -85,6 +85,22 @@ function formatSettingText(value, replacements) {
   }, value);
 }
 
+function formatCurrency(value, currencyCode = "USD") {
+  const amount = Number(value || 0);
+
+  try {
+    return new Intl.NumberFormat("en", {
+      style: "currency",
+      currency: currencyCode,
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currencyCode} ${amount.toLocaleString("en")}`;
+  }
+}
+
 function normalizeStoreCreditReward(reward) {
   const points = Number(reward?.points);
   const amount = Number(reward?.amount);
@@ -237,6 +253,7 @@ export function CustomerAccountLoyaltyPoints() {
   const [customerId, setCustomerId] = useState(null);
   const [storeCreditReward, setStoreCreditReward] = useState(null);
   const [storeCreditBalance, setStoreCreditBalance] = useState(null);
+  const [currencyCode, setCurrencyCode] = useState("USD");
   const [storeCreditPoints, setStoreCreditPoints] = useState("");
   const [isLoading, setIsLoading] = useState(Boolean(customer?.id));
   const [isRedeeming, setIsRedeeming] = useState(false);
@@ -278,7 +295,7 @@ export function CustomerAccountLoyaltyPoints() {
   );
   const conversionRateText = getTextSetting(
     "accountConversionRateText",
-    "{points} points = ${amount} store credit",
+    "{points} points = {amount} store credit",
   );
   const loadingText = getTextSetting(
     "accountLoadingText",
@@ -302,7 +319,7 @@ export function CustomerAccountLoyaltyPoints() {
   );
   const storeCreditSuccessMsg = getTextSetting(
     "accountGiftCardMsg",
-    "Store credit added: ${amount}",
+    "Store credit added: {amount}",
   );
   const errorMsg = getTextSetting(
     "accountErrorMsg",
@@ -411,6 +428,7 @@ export function CustomerAccountLoyaltyPoints() {
 
         setCustomerId(data.customerId);
         setPoints(data.loyaltyPoints || 0);
+        setCurrencyCode(data.currencyCode || "USD");
         setStoreCreditBalance(data.storeCreditBalance || null);
         setIsRedemptionEnabled(data.checkoutRedemptionEnabled !== false);
         const nextStoreCreditReward = normalizeStoreCreditReward(
@@ -596,12 +614,13 @@ export function CustomerAccountLoyaltyPoints() {
       setStoreCreditBalance((previousBalance) => ({
         amount:
           Number(previousBalance?.amount || 0) + Number(data.reward.amount || 0),
-        currencyCode: previousBalance?.currencyCode || null,
+        currencyCode:
+          previousBalance?.currencyCode || data.reward.currencyCode || currencyCode,
       }));
       setStoreCreditPoints(String(storeCreditReward.points));
       setMessage(
         formatSettingText(storeCreditSuccessMsg, {
-          amount: data.reward.amount.toLocaleString(),
+          amount: formatCurrency(data.reward.amount, currencyCode),
         }),
       );
       confirmationModalRef.current?.hideOverlay();
@@ -635,15 +654,16 @@ export function CustomerAccountLoyaltyPoints() {
     selectedStoreCreditPoints <= points;
   const selectedStoreCreditAmount =
     storeCreditReward && Number.isFinite(selectedStoreCreditPoints)
-      ? (
+      ? formatCurrency(
           storeCreditReward.amount *
-          (selectedStoreCreditPoints / storeCreditReward.points)
-        ).toLocaleString()
-      : "0";
+            (selectedStoreCreditPoints / storeCreditReward.points),
+          currencyCode,
+        )
+      : formatCurrency(0, currencyCode);
   const formattedConversionRate = storeCreditReward
     ? formatSettingText(conversionRateText, {
         points: storeCreditReward.points.toLocaleString(),
-        amount: storeCreditReward.amount.toLocaleString(),
+        amount: formatCurrency(storeCreditReward.amount, currencyCode),
       })
     : "";
   const handleStoreCreditPointsInput = (event) => {
@@ -760,7 +780,10 @@ export function CustomerAccountLoyaltyPoints() {
                   <s-heading>
                     {isLoading
                       ? loadingText
-                      : `$${Number(storeCreditBalance?.amount || 0).toLocaleString()}`}
+                      : formatCurrency(
+                          storeCreditBalance?.amount,
+                          storeCreditBalance?.currencyCode || currencyCode,
+                        )}
                   </s-heading>
                 </s-stack>
               </s-box>
@@ -802,7 +825,7 @@ export function CustomerAccountLoyaltyPoints() {
                         <s-text color="subdued">You will receive</s-text>
                         <s-text type="small">Shopify store credit</s-text>
                       </s-stack>
-                      <s-heading>${selectedStoreCreditAmount}</s-heading>
+                      <s-heading>{selectedStoreCreditAmount}</s-heading>
                     </s-grid>
                   </s-box>
 
@@ -1027,7 +1050,7 @@ export function CustomerAccountLoyaltyPoints() {
                               <s-text color="subdued" type="small">Amount</s-text>
                               <s-text type="strong">
                                 {item.discountAmount
-                                  ? `$${Number(item.discountAmount).toFixed(2)}`
+                                  ? formatCurrency(item.discountAmount, currencyCode)
                                   : "-"}
                               </s-text>
                             </s-stack>

@@ -186,8 +186,8 @@
     "section_description": "How the active settings read in the storefront experience.",
     "available_points": "Available points",
     "next_reward": "Next reward",
-    "example_customer": "Example customer after signup and a $250 order earns {{points}} order points.",
-    "redeem_gift_card": "Redeem for a ${{amount}} gift card.",
+    "example_customer": "Example customer after signup and an order earns {{points}} order points.",
+    "redeem_gift_card": "Redeem for a {{amount}} gift card.",
     "redeem_discount": "Redeem for {{discount}} discount.",
     "no_reward": "No reward",
     "add_reward_tier": "Add a reward tier to show redemption options."

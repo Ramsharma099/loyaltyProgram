@@ -1,15 +1,35 @@
 import {useFetcher} from 'react-router';
 
-function formatRewardTitle(reward) {
-  if (reward.type === 'gift_card') {
-    return reward.title || `$${reward.amount} gift card`;
-  }
+function formatCurrency(value, currencyCode = 'USD') {
+  const amount = Number(value || 0);
 
-  return `Discount $${reward.discount}`;
+  try {
+    return new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: currencyCode,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currencyCode} ${amount.toLocaleString('en')}`;
+  }
 }
 
-function formatRewardDescription(reward) {
-  if (reward.description) return reward.description;
+function formatRewardTitle(reward, currencyCode) {
+  if (reward.type === 'gift_card') {
+    return `${formatCurrency(reward.amount, currencyCode)} gift card`;
+  }
+
+  return `Discount ${formatCurrency(reward.discount, currencyCode)}`;
+}
+
+function formatRewardDescription(reward, currencyCode) {
+  if (reward.description && reward.type === 'discount') return reward.description;
+
+  if (reward.type === 'gift_card') {
+    return `Redeem ${Number(reward.points || 0).toLocaleString()} points for a ${formatCurrency(reward.amount, currencyCode)} gift card.`;
+  }
 
   return `Redeem ${Number(reward.points || 0).toLocaleString()} points.`;
 }
@@ -18,12 +38,12 @@ function formatRewardType(reward) {
   return reward.type === 'gift_card' ? 'Gift card' : 'Discount';
 }
 
-function formatRewardValue(reward) {
+function formatRewardValue(reward, currencyCode) {
   if (reward.type === 'gift_card') {
-    return `$${Number(reward.amount || 0).toLocaleString()} gift`;
+    return `${formatCurrency(reward.amount, currencyCode)} gift`;
   }
 
-  return `$${Number(reward.discount || 0).toLocaleString()} off`;
+  return `${formatCurrency(reward.discount, currencyCode)} off`;
 }
 
 function getRewardKey(reward) {
@@ -58,6 +78,7 @@ export function LoyaltyRewards({
   const rewardOptions = loyalty?.rewardOptions || [];
   const hasPendingRedemption = Boolean(loyalty?.hasPendingCheckoutRedemption);
   const points = Number(loyalty?.loyaltyPoints || 0);
+  const currencyCode = loyalty?.currencyCode || 'USD';
   const errorMessage =
     fetcher.data?.loyalty?.message ||
     (hasPendingRedemption ? PENDING_REDEMPTION_MESSAGE : loyalty?.message);
@@ -128,15 +149,15 @@ export function LoyaltyRewards({
               >
                 <div className="loyalty-cart-panel__reward-copy">
                   <div className="loyalty-cart-panel__reward-top">
-                    <strong>{formatRewardTitle(reward)}</strong>
+                    <strong>{formatRewardTitle(reward, currencyCode)}</strong>
                     <span className="loyalty-cart-panel__badge">
                       {formatRewardType(reward)}
                     </span>
                     <span className="loyalty-cart-panel__value">
-                      {formatRewardValue(reward)}
+                      {formatRewardValue(reward, currencyCode)}
                     </span>
                   </div>
-                  <span>{formatRewardDescription(reward)}</span>
+                  <span>{formatRewardDescription(reward, currencyCode)}</span>
                   <small>
                     {canRedeem
                       ? `${rewardPoints.toLocaleString()} points required`
@@ -154,7 +175,7 @@ export function LoyaltyRewards({
                   <button
                     type="submit"
                     disabled={hasPendingRedemption || !canRedeem || isSubmitting}
-                    aria-label={`Redeem ${formatRewardTitle(reward)}`}
+                    aria-label={`Redeem ${formatRewardTitle(reward, currencyCode)}`}
                   >
                     {hasPendingRedemption
                       ? 'Applied'

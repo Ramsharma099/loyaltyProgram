@@ -24,7 +24,6 @@ const DEFAULT_REWARD_OPTIONS = [
     type: "gift_card",
     points: 1500,
     amount: 15,
-    title: "$15 Gift Card",
     description: "Redeem 1,500 points to get for free",
   },
 ];
@@ -84,24 +83,44 @@ function replaceRewardWords(text, rewardLanguage) {
     .replace(/\bdiscount\b/gi, rewardLanguage.singular);
 }
 
-function formatRewardLabel(reward) {
+function formatCurrency(value, currencyCode = "USD") {
+  const amount = Number(value || 0);
+
+  try {
+    return new Intl.NumberFormat("en", {
+      style: "currency",
+      currency: currencyCode,
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currencyCode} ${amount.toLocaleString("en")}`;
+  }
+}
+
+function formatRewardLabel(reward, currencyCode) {
   if (reward.type === "gift_card") {
-    return reward.title || `$${reward.amount} Gift Card`;
+    return `${formatCurrency(reward.amount, currencyCode)} Gift Card`;
   }
 
   if (reward.type === "store_credit") {
     return reward.title || "Store Credit Reward";
   }
 
-  return `Discount $${reward.discount} for ${reward.points} points`;
+  return `Discount ${formatCurrency(reward.discount, currencyCode)} for ${reward.points} points`;
 }
 
-function formatRewardDescription(reward) {
-  if (reward.description) {
+function formatRewardDescription(reward, currencyCode) {
+  if (reward.description && reward.type === "discount") {
     return reward.description;
   }
 
-  return `Discount Reward - Redeem ${reward.points} points to receive a $${reward.discount} discount`;
+  if (reward.type === "gift_card") {
+    return `Redeem ${reward.points} points for a ${formatCurrency(reward.amount, currencyCode)} gift card`;
+  }
+
+  return `Discount Reward - Redeem ${reward.points} points to receive a ${formatCurrency(reward.discount, currencyCode)} discount`;
 }
 
 function getRewardValue(reward) {
@@ -290,6 +309,7 @@ function Extension() {
   const [customerId, setCustomerId] = useState(null);
 
   const [points, setPoints] = useState(0);
+  const [currencyCode, setCurrencyCode] = useState("USD");
   const [rewardOptions, setRewardOptions] = useState(DEFAULT_REWARD_OPTIONS);
   const [rewardTypePreference, setRewardTypePreference] = useState("both");
   const [discountCodes, setDiscountCodes] = useState(() =>
@@ -661,6 +681,7 @@ function Extension() {
 
         setCustomerId(data.customerId);
         setPoints(data.loyaltyPoints);
+        setCurrencyCode(data.currencyCode || "USD");
         setRewardTypePreference(
           normalizeRewardTypePreference(data.rewardTypePreference),
         );
@@ -956,10 +977,10 @@ function Extension() {
                     <s-stack gap="small">
                       <s-stack gap="none">
                         <s-text type="strong">
-                          {formatRewardLabel(reward)}
+                          {formatRewardLabel(reward, currencyCode)}
                         </s-text>
                         <s-text color="subdued" type="small">
-                        {formatRewardDescription(reward)}
+                        {formatRewardDescription(reward, currencyCode)}
                         </s-text>
                       </s-stack>
                       <s-stack direction="inline" gap="small">

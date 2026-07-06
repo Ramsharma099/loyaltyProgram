@@ -186,8 +186,8 @@
     "section_description": "Comment les paramètres actifs se lisent dans l'expérience storefront.",
     "available_points": "Points disponibles",
     "next_reward": "Récompense suivante",
-    "example_customer": "Le client type après l'inscription et une commande de $250 gagne {{points}} points de commande.",
-    "redeem_gift_card": "Échangez contre une carte-cadeau de ${{amount}}.",
+    "example_customer": "Le client type après l'inscription et une commande gagne {{points}} points de commande.",
+    "redeem_gift_card": "Échangez contre une carte-cadeau de {{amount}}.",
     "redeem_discount": "Échangez contre {{discount}} de remise.",
     "no_reward": "Pas de récompense",
     "add_reward_tier": "Ajoutez un niveau de récompense pour afficher les options d'échange."

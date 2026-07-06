@@ -51,6 +51,7 @@
   data-api-base-url="/apps/loyalty-points"
   data-balance-url="/apps/loyalty-points"
   data-shop-domain="{{ shop.permanent_domain | escape }}"
+  data-currency-code="{{ shop.currency | escape }}"
   data-customer-id="{{ customer_id }}"
   data-logged-in="{% if customer %}true{% else %}false{% endif %}"
   data-heading="{{ block.settings.heading | escape }}"
@@ -650,6 +651,21 @@
           });
       }
 
+      function formatFallbackCurrency(value, currencyCode) {
+        var amount = Number(value || 0);
+        try {
+          return new Intl.NumberFormat('en', {
+            style: 'currency',
+            currency: currencyCode || 'USD',
+            currencyDisplay: 'narrowSymbol',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+          }).format(amount);
+        } catch (error) {
+          return (currencyCode || 'USD') + ' ' + amount.toLocaleString('en');
+        }
+      }
+
       function renderFallbackRewards(widget, rewards, points, pendingReward) {
         var container = widget.querySelector('[data-loyalty-rewards]');
         if (!container || container.querySelector('.loyalty-points-widget__reward-list')) return;
@@ -677,12 +693,15 @@
           var title = document.createElement('p');
           title.className = 'loyalty-points-widget__reward-title';
           title.textContent = type === 'gift_card'
-            ? (reward.title || ('$' + reward.amount + ' Gift Card'))
-            : ('Discount $' + reward.discount + ' for ' + reward.points + ' points');
+            ? (formatFallbackCurrency(reward.amount, widget.dataset.currencyCode) + ' Gift Card')
+            : ('Discount ' + formatFallbackCurrency(reward.discount, widget.dataset.currencyCode) + ' for ' + reward.points + ' points');
           var description = document.createElement('p');
           description.className = 'loyalty-points-widget__reward-description';
-          description.textContent = reward.description ||
-            ('Redeem ' + reward.points + ' points for this reward.');
+          description.textContent = type === 'gift_card'
+            ? ('Redeem ' + reward.points + ' points for a ' +
+              formatFallbackCurrency(reward.amount, widget.dataset.currencyCode) + ' gift card.')
+            : (reward.description ||
+              ('Redeem ' + reward.points + ' points for this reward.'));
           var state = document.createElement('span');
           state.className = 'loyalty-points-widget__reward-cta';
           state.textContent = isApplied ? 'Applied' : 'Redeem';
@@ -750,6 +769,7 @@
             if (!data.success) throw new Error(data.message || 'Could not load points');
 
             applyFallbackCustomCss(data.iframeCustomCss);
+            widget.dataset.currencyCode = data.currencyCode || widget.dataset.currencyCode || 'USD';
 
             var points = Number(data.loyaltyPoints || 0);
             var status = widget.querySelector('[data-loyalty-status]');

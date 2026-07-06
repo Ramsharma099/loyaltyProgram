@@ -21,7 +21,6 @@ export const DEFAULT_GIFT_CARD_REWARD_OPTIONS = [
     type: "gift_card",
     points: 1500,
     amount: 15,
-    title: "$15 Gift Card",
     description: "Redeem 1,500 points to get for free",
   },
 ];
@@ -32,7 +31,7 @@ export const SPECIAL_REWARD_OPTIONS = [
     points: 100,
     amount: 1,
     title: "Store Credit Reward",
-    description: "Redeem 100 points to get $1 store credits",
+    description: "Redeem points for store credit",
   },
 ];
 
@@ -74,7 +73,7 @@ export const DEFAULT_LOYALTY_SETTINGS = {
   accountDisabledMsg: "Store credit conversion is currently disabled.",
   accountNotEnoughPtsMsg:
     "Earn {remaining_points} more points to convert this amount.",
-  accountGiftCardMsg: "Store credit added: ${amount}",
+  accountGiftCardMsg: "Store credit added: {amount}",
   accountErrorMsg: "Could not convert points to store credit",
   accountConfigErrorMsg: "Loyalty API URL is not configured.",
   // Iframe Widget UI Settings
@@ -175,10 +174,6 @@ export function normalizeRewardOptions(value) {
           type: "gift_card",
           points,
           amount,
-          title: reward?.title || `$${amount} Gift Card`,
-          description:
-            reward?.description ||
-            `Redeem ${points.toLocaleString("en")} points for a $${amount} gift card`,
         };
       }
 

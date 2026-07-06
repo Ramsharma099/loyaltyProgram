@@ -344,12 +344,6 @@ function parseRewardRows(rows, rewardType, { requireRewards = true } = {}) {
         type: config.rewardType,
         points,
         [config.amountKey]: amount,
-        ...(rewardType === "gift_card"
-          ? {
-              title: `$${amount} Gift Card`,
-              description: `Redeem ${formatNumber(points)} points for a $${amount} gift card`,
-            }
-          : {}),
       });
     }
   });

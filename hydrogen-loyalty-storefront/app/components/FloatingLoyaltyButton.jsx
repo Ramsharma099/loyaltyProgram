@@ -1,26 +1,46 @@
 import {Await, useFetcher} from 'react-router';
 import {Suspense, useEffect, useMemo, useState} from 'react';
 
-function formatRewardTitle(reward) {
-  if (reward.type === 'gift_card') {
-    return reward.title || `$${reward.amount} gift card`;
-  }
+function formatCurrency(value, currencyCode = 'USD') {
+  const amount = Number(value || 0);
 
-  return `Discount $${reward.discount}`;
+  try {
+    return new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: currencyCode,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currencyCode} ${amount.toLocaleString('en')}`;
+  }
 }
 
-function formatRewardDescription(reward) {
-  if (reward.description) return reward.description;
+function formatRewardTitle(reward, currencyCode) {
+  if (reward.type === 'gift_card') {
+    return `${formatCurrency(reward.amount, currencyCode)} gift card`;
+  }
+
+  return `Discount ${formatCurrency(reward.discount, currencyCode)}`;
+}
+
+function formatRewardDescription(reward, currencyCode) {
+  if (reward.description && reward.type === 'discount') return reward.description;
+
+  if (reward.type === 'gift_card') {
+    return `Redeem ${Number(reward.points || 0).toLocaleString()} points for a ${formatCurrency(reward.amount, currencyCode)} gift card.`;
+  }
 
   return `Redeem ${Number(reward.points || 0).toLocaleString()} points.`;
 }
 
-function formatRewardValue(reward) {
+function formatRewardValue(reward, currencyCode) {
   if (reward.type === 'gift_card') {
-    return `$${Number(reward.amount || 0).toLocaleString()} gift card`;
+    return `${formatCurrency(reward.amount, currencyCode)} gift card`;
   }
 
-  return `$${Number(reward.discount || 0).toLocaleString()} off`;
+  return `${formatCurrency(reward.discount, currencyCode)} off`;
 }
 
 function getRewardKey(reward) {
@@ -63,6 +83,7 @@ function FloatingLoyaltyPanel({isLoggedIn}) {
     )}`;
   const loyalty = balanceFetcher.data;
   const points = Number(loyalty?.loyaltyPoints || 0);
+  const currencyCode = loyalty?.currencyCode || 'USD';
   const hasPendingRedemption = Boolean(
     loyalty?.hasPendingCheckoutRedemption ||
       redeemFetcher.data?.loyalty?.reward?.rewardType === 'discount',
@@ -115,6 +136,7 @@ function FloatingLoyaltyPanel({isLoggedIn}) {
             <Overview
               availableRewards={availableRewards}
               balanceMessage={balanceMessage}
+              currencyCode={currencyCode}
               isLoggedIn={isLoggedIn}
               isLoadingBalance={isLoadingBalance}
               loyalty={loyalty}
@@ -126,6 +148,7 @@ function FloatingLoyaltyPanel({isLoggedIn}) {
           ) : (
             <DetailView
               activeView={activeView}
+              currencyCode={currencyCode}
               isRedeeming={isRedeeming}
               points={points}
               redeemFetcher={redeemFetcher}
@@ -156,6 +179,7 @@ function FloatingLoyaltyPanel({isLoggedIn}) {
 function Overview({
   availableRewards,
   balanceMessage,
+  currencyCode,
   isLoggedIn,
   isLoadingBalance,
   loyalty,
@@ -198,7 +222,7 @@ function Overview({
           {nextReward ? (
             <div className="floating-loyalty__next">
               <span>Next reward</span>
-              <strong>{formatRewardTitle(nextReward)}</strong>
+              <strong>{formatRewardTitle(nextReward, currencyCode)}</strong>
               <small>
                 {Number(nextReward.points || 0) - points} more points needed
               </small>
@@ -247,6 +271,7 @@ function Overview({
 
 function DetailView({
   activeView,
+  currencyCode,
   isRedeeming,
   points,
   redeemFetcher,
@@ -316,6 +341,7 @@ function DetailView({
           </div>
         ) : (
           <RewardList
+            currencyCode={currencyCode}
             isRedeeming={isRedeeming}
             points={points}
             redeemFetcher={redeemFetcher}
@@ -334,6 +360,7 @@ function DetailView({
 }
 
 function RewardList({
+  currencyCode,
   isRedeeming,
   points,
   redeemFetcher,
@@ -372,14 +399,14 @@ function RewardList({
                 <button
                   type="submit"
                   disabled={hasPendingRedemption || !canRedeem || isRedeeming}
-                  aria-label={`Redeem ${formatRewardTitle(reward)}`}
+                  aria-label={`Redeem ${formatRewardTitle(reward, currencyCode)}`}
                 >
                   <span className="floating-loyalty__reward-main">
                     <span>
-                      <strong>{formatRewardTitle(reward)}</strong>
-                      <span>{formatRewardDescription(reward)}</span>
+                      <strong>{formatRewardTitle(reward, currencyCode)}</strong>
+                      <span>{formatRewardDescription(reward, currencyCode)}</span>
                     </span>
-                    <em>{formatRewardValue(reward)}</em>
+                    <em>{formatRewardValue(reward, currencyCode)}</em>
                   </span>
                   <span className="floating-loyalty__reward-meta">
                     <small>{rewardPoints.toLocaleString()} points</small>

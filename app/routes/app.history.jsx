@@ -153,6 +153,24 @@ async function loadOrderNameById(admin, orderIds) {
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
+  let currencyCode = "USD";
+
+  try {
+    const currencyData = await runShopifyGraphql(
+      admin,
+      `#graphql
+        query LoyaltyHistoryShopCurrency {
+          shop {
+            currencyCode
+          }
+        }
+      `,
+      { operation: "Load loyalty history shop currency" },
+    );
+    currencyCode = currencyData.shop?.currencyCode || currencyCode;
+  } catch (error) {
+    console.error("[history] Could not load shop currency", error);
+  }
 
   const shop = await prisma.shop.findUnique({
     where: {
@@ -163,6 +181,7 @@ export const loader = async ({ request }) => {
   if (!shop) {
     return Response.json({
       history: [],
+      currencyCode,
       totals: emptyTotals,
     });
   }
@@ -170,6 +189,7 @@ export const loader = async ({ request }) => {
   if (!prisma.rewardActivityLog) {
     return Response.json({
       history: [],
+      currencyCode,
       totals: emptyTotals,
       setupMessage:
         "Reward history is being prepared. Restart the app server after Prisma generate completes.",
@@ -260,6 +280,7 @@ export const loader = async ({ request }) => {
   }
 
   return Response.json({
+    currencyCode,
     history,
     orderNameById,
     shopDomain: session.shop,
@@ -269,6 +290,7 @@ export const loader = async ({ request }) => {
 
 export default function HistoryPage() {
   const {
+    currencyCode = "USD",
     history = [],
     orderNameById = {},
     shopDomain,
@@ -278,7 +300,10 @@ export default function HistoryPage() {
   const numberFormatter = new Intl.NumberFormat("en");
   const currencyFormatter = new Intl.NumberFormat("en", {
     style: "currency",
-    currency: "USD",
+    currency: currencyCode,
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
   });
 
   const metrics = [
