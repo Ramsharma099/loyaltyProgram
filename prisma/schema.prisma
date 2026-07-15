@@ -44,15 +44,16 @@ model LoyaltySetting {
   shopId Int  @unique
   shop   Shop @relation(fields: [shopId], references: [id])
 
-  signupBonusPoints         Int     @default(100)
-  orderSpendAmount          Int     @default(100)
-  orderSpendPoints          Int     @default(10)
-  refundSpendAmount         Int     @default(100)
-  refundSpendPoints         Int     @default(10)
-  checkoutRedemptionEnabled Boolean @default(true)
-  checkoutRewardLimit       Int     @default(10)
-  preferredIntegration      String  @default("theme")
-  redemptionRewards         String  @db.Text
+  signupBonusPoints            Int     @default(100)
+  orderSpendAmount             Int     @default(100)
+  orderSpendPoints             Int     @default(10)
+  refundSpendAmount            Int     @default(100)
+  refundSpendPoints            Int     @default(10)
+  checkoutRedemptionEnabled    Boolean @default(true)
+  storeCreditRedemptionEnabled Boolean @default(true)
+  checkoutRewardLimit          Int     @default(10)
+  preferredIntegration         String  @default("theme")
+  redemptionRewards            String  @db.Text
 
   // Checkout UI Text Settings
   checkoutLoginMessage        String @db.Text

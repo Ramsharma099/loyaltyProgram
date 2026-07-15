@@ -48,7 +48,8 @@
   }
 
   function formatRewardDescription(reward, currencyCode) {
-    if (reward.description && reward.type === "discount") return reward.description;
+    if (reward.description && reward.type === "discount")
+      return reward.description;
 
     if (reward.type === "gift_card") {
       return `Redeem ${reward.points} points for a ${formatCurrency(reward.amount, currencyCode)} gift card.`;
@@ -70,7 +71,9 @@
   }
 
   function setRewardMessage(container, message, isError) {
-    let messageElement = container.querySelector("[data-loyalty-reward-message]");
+    let messageElement = container.querySelector(
+      "[data-loyalty-reward-message]",
+    );
 
     if (!messageElement) {
       messageElement = document.createElement("p");
@@ -101,25 +104,6 @@
     }
 
     return data;
-  }
-
-  async function hasCartItems() {
-    const response = await fetch("/cart.js", {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error("Could not check your cart. Please try again.");
-    }
-
-    const data = await readJsonResponse(
-      response,
-      "Could not check your cart. Please try again.",
-    );
-
-    return Number(data.item_count || 0) > 0;
   }
 
   function applyCustomCss(css) {
@@ -196,7 +180,9 @@
     setRewardMessage(container, "Creating your reward...", false);
 
     try {
-      if (!(await hasCartItems())) {
+      const ruleContext = await getCartRuleContext();
+
+      if (!ruleContext || ruleContext.cartLines.length < 1) {
         throw new Error("Please add product to cart");
       }
 
@@ -213,6 +199,7 @@
             pointsToRedeem: Number(reward.points),
             rewardType: reward.type || "discount",
             allowPendingRewardCheckout: true,
+            ...ruleContext,
           }),
         },
       );
@@ -242,14 +229,42 @@
     }
   }
 
-  function isPendingReward(reward, pendingReward) {
-    if (!pendingReward?.rewardCode) return false;
+  function normalizePendingReward(pendingReward) {
+    if (!pendingReward) return null;
 
-    return (
-      (reward.type || "discount") ===
-        (pendingReward.rewardType || "discount") &&
-      Number(reward.points) === Number(pendingReward.pointsUsed)
-    );
+    return {
+      rewardCode: pendingReward.rewardCode,
+      rewardType: (pendingReward.rewardType || pendingReward.type || "discount")
+        .toString()
+        .toLowerCase(),
+      pointsUsed: Number(
+        pendingReward.pointsUsed ?? pendingReward.points ?? pendingReward.pointsToRedeem ?? 0,
+      ),
+      discountAmount:
+        pendingReward.discountAmount ?? pendingReward.amount ?? null,
+    };
+  }
+
+  function isPendingReward(reward, pendingReward) {
+    const normalizedPending = normalizePendingReward(pendingReward);
+    if (!normalizedPending?.rewardCode) return false;
+
+    const rewardType = (reward.type || "discount").toString().toLowerCase();
+    const rewardPoints = Number(reward.points);
+    const rewardAmount = Number(reward.discount ?? reward.amount ?? 0);
+
+    if (rewardType !== normalizedPending.rewardType) return false;
+    if (Number.isNaN(rewardPoints) || rewardPoints !== normalizedPending.pointsUsed)
+      return false;
+
+    if (rewardType === "discount") {
+      return (
+        normalizedPending.discountAmount == null ||
+        Number(normalizedPending.discountAmount) === rewardAmount
+      );
+    }
+
+    return true;
   }
 
   async function cancelPendingReward(widget, container, pendingReward, button) {
@@ -262,7 +277,7 @@
         `${widget.dataset.apiBaseUrl.replace(/\/$/, "")}/api/redeem-points`,
         {
           method: "POST",
-          headers: {"Content-Type": "application/json"},
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             operation: "releasePendingReward",
             customerId:
@@ -272,24 +287,41 @@
           }),
         },
       );
-      const data = await readJsonResponse(response, widget.dataset.errorMessage);
+      const data = await readJsonResponse(
+        response,
+        widget.dataset.errorMessage,
+      );
 
       if (!data.success) {
         throw new Error(data.message || widget.dataset.errorMessage);
       }
 
       widget.dataset.hasPendingCheckoutRedemption = "false";
-      setRewardMessage(container, "Reward removed. You can redeem another reward.", false);
+      setRewardMessage(
+        container,
+        "Reward removed. You can redeem another reward.",
+        false,
+      );
       await loadWidgetData(widget);
     } catch (error) {
       console.error("[loyalty-points] Could not remove reward", error);
       button.disabled = false;
       button.textContent = originalText;
-      setRewardMessage(container, error.message || widget.dataset.errorMessage, true);
+      setRewardMessage(
+        container,
+        error.message || widget.dataset.errorMessage,
+        true,
+      );
     }
   }
 
-  function createRewardItem(widget, container, reward, isAvailable, pendingReward) {
+  function createRewardItem(
+    widget,
+    container,
+    reward,
+    isAvailable,
+    pendingReward,
+  ) {
     const item = document.createElement("li");
     item.className = "loyalty-points-widget__reward";
 
@@ -301,7 +333,10 @@
     item.classList.toggle("loyalty-points-widget__reward--applied", isApplied);
     const canRedeem = isAvailable && !hasPendingReward;
     button.disabled = !canRedeem;
-    button.setAttribute("aria-label", `Redeem ${formatRewardTitle(reward, widget.dataset.currencyCode)}`);
+    button.setAttribute(
+      "aria-label",
+      `Redeem ${formatRewardTitle(reward, widget.dataset.currencyCode)}`,
+    );
 
     appendText(
       button,
@@ -327,7 +362,9 @@
     );
 
     if (canRedeem) {
-      button.addEventListener("click", () => redeemReward(widget, container, reward, button));
+      button.addEventListener("click", () =>
+        redeemReward(widget, container, reward, button),
+      );
     }
 
     item.appendChild(button);
@@ -368,12 +405,21 @@
     container.appendChild(list);
   }
 
-  function renderAvailableRewards(widget, container, dataset, rewards, points, pendingReward) {
+  function renderAvailableRewards(
+    widget,
+    container,
+    dataset,
+    rewards,
+    points,
+    pendingReward,
+  ) {
     if (dataset.showRewards !== "true") return;
 
     container.replaceChildren();
 
-    const availableRewards = rewards.filter((reward) => Number(reward.points) <= points);
+    const availableRewards = rewards.filter(
+      (reward) => Number(reward.points) <= points,
+    );
     appendText(
       container,
       "p",
@@ -412,8 +458,12 @@
     const balanceValue = widget.querySelector("[data-loyalty-balance-value]");
     const viewPoints = widget.querySelectorAll("[data-loyalty-view-points]");
     const rewardsContainer = widget.querySelector("[data-loyalty-rewards]");
-    const allRewardsContainer = widget.querySelector("[data-loyalty-all-rewards]");
-    const availableCount = widget.querySelector("[data-loyalty-available-count]");
+    const allRewardsContainer = widget.querySelector(
+      "[data-loyalty-all-rewards]",
+    );
+    const availableCount = widget.querySelector(
+      "[data-loyalty-available-count]",
+    );
 
     try {
       const params = new URLSearchParams({
@@ -421,6 +471,14 @@
         shop: dataset.shopDomain || "",
         surface: "theme",
       });
+      const ruleContext = await getCartRuleContext();
+
+      if (ruleContext) {
+        params.set("cartSubtotal", String(ruleContext.cartSubtotal));
+        params.set("productIds", JSON.stringify(ruleContext.productIds));
+        params.set("cartLines", JSON.stringify(ruleContext.cartLines));
+      }
+
       const response = await fetch(`${dataset.balanceUrl}?${params}`);
       const data = await readJsonResponse(response, dataset.errorMessage);
 
@@ -429,7 +487,8 @@
       }
 
       applyCustomCss(data.iframeCustomCss);
-      widget.dataset.currencyCode = dataset.currencyCode || data.currencyCode || "USD";
+      widget.dataset.currencyCode =
+        dataset.currencyCode || data.currencyCode || "USD";
       loadCustomCss(widget);
 
       if (dataset.loggedIn !== "true") return;
@@ -446,10 +505,12 @@
       const availableRewards = rewards.filter(
         (reward) => Number(reward.points) <= points,
       );
-      const hasPendingCheckoutRedemption = Boolean(
-        data.hasPendingCheckoutRedemption || data.pendingCheckoutRedemption,
+      const pendingCheckoutRedemption = normalizePendingReward(
+        data.pendingCheckoutRedemption || null,
       );
-      const pendingCheckoutRedemption = data.pendingCheckoutRedemption || null;
+      const hasPendingCheckoutRedemption = Boolean(
+        data.hasPendingCheckoutRedemption || pendingCheckoutRedemption,
+      );
 
       if (data.customerId) {
         widget.dataset.loyaltyCustomerId = String(data.customerId);
@@ -473,7 +534,11 @@
         element.textContent = points.toLocaleString();
       });
 
-      if (rewardsContainer && rewards.length > 0 && data.checkoutRedemptionEnabled !== false) {
+      if (
+        rewardsContainer &&
+        rewards.length > 0 &&
+        data.checkoutRedemptionEnabled !== false
+      ) {
         renderAvailableRewards(
           widget,
           rewardsContainer,
@@ -510,6 +575,39 @@
     }
   }
 
+  async function getCartRuleContext() {
+    try {
+      const response = await fetch("/cart.js", {
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const cart = await response.json();
+      const cartLines = Array.isArray(cart.items)
+        ? cart.items.map((item) => ({
+            productId: item.product_id ? String(item.product_id) : "",
+            variantId: item.variant_id ? String(item.variant_id) : "",
+            quantity: item.quantity || 0,
+          }))
+        : [];
+
+      return {
+        cartSubtotal: Number(cart.items_subtotal_price || 0) / 100,
+        cartLines,
+        productIds: [
+          ...new Set(cartLines.map((line) => line.productId).filter(Boolean)),
+        ],
+      };
+    } catch {
+      return null;
+    }
+  }
+
   function setWidgetOpen(widget, open, restoreFocus = false) {
     const launcher = widget.querySelector("[data-loyalty-toggle]");
     const panel = widget.querySelector("[data-loyalty-panel]");
@@ -526,7 +624,8 @@
   }
 
   function ensureCriticalStyles() {
-    if (document.getElementById("loyalty-points-widget-critical-styles")) return;
+    if (document.getElementById("loyalty-points-widget-critical-styles"))
+      return;
 
     const style = document.createElement("style");
     style.id = "loyalty-points-widget-critical-styles";
@@ -1011,7 +1110,9 @@
       });
     }
 
-    const iframe = widget.querySelector(".loyalty-points-widget__floating-iframe");
+    const iframe = widget.querySelector(
+      ".loyalty-points-widget__floating-iframe",
+    );
     if (iframe) {
       setImportantStyles(iframe, {
         display: "block",
@@ -1035,7 +1136,8 @@
 
   function removeDuplicateFloatingWidgets(widget) {
     const globalWidget = getFloatingWidgets().find(
-      (floatingWidget) => floatingWidget.dataset.loyaltyGlobalFloating === "true",
+      (floatingWidget) =>
+        floatingWidget.dataset.loyaltyGlobalFloating === "true",
     );
 
     if (globalWidget && globalWidget !== widget) {
@@ -1051,7 +1153,8 @@
   }
 
   function mountFloatingElement(widget) {
-    if (!["floating", "floating_iframe"].includes(widget.dataset.displayMode)) return;
+    if (!["floating", "floating_iframe"].includes(widget.dataset.displayMode))
+      return;
     if (!widget.isConnected) return;
 
     ensureCriticalStyles();
@@ -1080,7 +1183,9 @@
         const target = button.dataset.loyaltyViewTarget;
         const isOverview = target === "overview";
         const header = widget.querySelector(".loyalty-points-widget__header");
-        const panelTop = widget.querySelector(".loyalty-points-widget__panel-top");
+        const panelTop = widget.querySelector(
+          ".loyalty-points-widget__panel-top",
+        );
         const balance = widget.querySelector("[data-loyalty-balance]");
         const actions = widget.querySelector(".loyalty-points-widget__actions");
         const panel = widget.querySelector("[data-loyalty-panel]");
@@ -1099,31 +1204,39 @@
   }
 
   function initializeWidgets() {
-    document.querySelectorAll("[data-loyalty-floating-wrapper]").forEach((widget) => {
-      mountFloatingElement(widget);
-    });
+    document
+      .querySelectorAll("[data-loyalty-floating-wrapper]")
+      .forEach((widget) => {
+        mountFloatingElement(widget);
+      });
 
-    document.querySelectorAll("[data-loyalty-points-widget]").forEach((widget) => {
-      initializeWidget(widget);
-      if (widget.dataset.loyaltyDataLoaded !== "true") {
-        widget.dataset.loyaltyDataLoaded = "true";
-        loadWidgetData(widget);
-      }
-    });
+    document
+      .querySelectorAll("[data-loyalty-points-widget]")
+      .forEach((widget) => {
+        initializeWidget(widget);
+        if (widget.dataset.loyaltyDataLoaded !== "true") {
+          widget.dataset.loyaltyDataLoaded = "true";
+          loadWidgetData(widget);
+        }
+      });
   }
 
   window.addEventListener("message", (event) => {
     if (event.data?.type === "loyalty-floating-iframe-state") {
-      document.querySelectorAll(".loyalty-points-widget__floating-iframe").forEach((iframe) => {
-        if (iframe.contentWindow !== event.source) return;
+      document
+        .querySelectorAll(".loyalty-points-widget__floating-iframe")
+        .forEach((iframe) => {
+          if (iframe.contentWindow !== event.source) return;
 
-        const wrapper = iframe.closest(".loyalty-points-widget--floating-iframe");
-        wrapper?.classList.toggle(
-          "loyalty-points-widget--iframe-open",
-          Boolean(event.data.open),
-        );
-        if (wrapper) applyFloatingIframeLayoutStyles(wrapper);
-      });
+          const wrapper = iframe.closest(
+            ".loyalty-points-widget--floating-iframe",
+          );
+          wrapper?.classList.toggle(
+            "loyalty-points-widget--iframe-open",
+            Boolean(event.data.open),
+          );
+          if (wrapper) applyFloatingIframeLayoutStyles(wrapper);
+        });
       return;
     }
 
@@ -1132,11 +1245,13 @@
     const height = Number(event.data.height);
     if (!Number.isFinite(height) || height < 120) return;
 
-    document.querySelectorAll(".loyalty-points-widget__iframe").forEach((iframe) => {
-      if (iframe.contentWindow !== event.source) return;
+    document
+      .querySelectorAll(".loyalty-points-widget__iframe")
+      .forEach((iframe) => {
+        if (iframe.contentWindow !== event.source) return;
 
-      iframe.style.height = `${Math.min(Math.ceil(height), 1200)}px`;
-    });
+        iframe.style.height = `${Math.min(Math.ceil(height), 1200)}px`;
+      });
   });
 
   let initializeScheduled = false;
@@ -1170,7 +1285,9 @@
       return result;
     };
 
-    window.history.replaceState = function replaceStateWithLoyaltyRefresh(...args) {
+    window.history.replaceState = function replaceStateWithLoyaltyRefresh(
+      ...args
+    ) {
       const result = originalReplaceState.apply(this, args);
       scheduleFromNavigation();
       return result;
@@ -1244,8 +1361,14 @@
   }
 
   document.addEventListener("shopify:section:load", initializeWidgets);
-  document.addEventListener("shopify:section:reorder", scheduleInitializeWidgets);
-  document.addEventListener("shopify:section:select", scheduleInitializeWidgets);
+  document.addEventListener(
+    "shopify:section:reorder",
+    scheduleInitializeWidgets,
+  );
+  document.addEventListener(
+    "shopify:section:select",
+    scheduleInitializeWidgets,
+  );
   window.addEventListener("pageshow", scheduleInitializeWidgets);
   bindNavigationEvents();
   document.addEventListener("visibilitychange", () => {

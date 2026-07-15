@@ -6,7 +6,7 @@
 api_version = "2026-04"
 
 [[extensions]]
-name = "loyalty-checkout"
+name = "Redeem Points"
 handle = "loyalty-checkout"
 type = "ui_extension"
 uid = "e4f5d875-ab79-4edd-e667-b6f78db2ce1f82eb47dd"
@@ -18,6 +18,15 @@ uid = "e4f5d875-ab79-4edd-e667-b6f78db2ce1f82eb47dd"
 [[extensions.targeting]]
 module = "./src/Checkout.jsx"
 target = "purchase.checkout.contact.render-after"
+
+[[extensions.targeting]]
+module = "./src/Checkout.jsx"
+target = "purchase.checkout.block.render"
+default_placement = "ORDER_SUMMARY2"
+
+[[extensions.targeting]]
+module = "./src/Checkout.jsx"
+target = "purchase.checkout.payment-method-list.render-before"
 
 [extensions.capabilities]
 # Gives your extension access to directly query Shopify’s storefront API.

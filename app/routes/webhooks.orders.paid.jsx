@@ -11,12 +11,28 @@ import {
   webhookProcessingError,
 } from "../services/errors.server";
 
+function summarizeOrderPaidPayload(payload) {
+  return {
+    orderId: payload?.admin_graphql_api_id || payload?.id || null,
+    orderName: payload?.name || payload?.order_number || null,
+    totalPrice: payload?.current_total_price || payload?.total_price || null,
+    currency: payload?.currency || payload?.presentment_currency || null,
+    processedAt: payload?.processed_at || null,
+    loyaltyDiscountCodeCount: Array.isArray(payload?.discount_codes)
+      ? payload.discount_codes.length
+      : 0,
+    giftCardPaymentCount: Array.isArray(payload?.gift_cards)
+      ? payload.gift_cards.length
+      : 0,
+  };
+}
+
 async function createWebhookLog(topic, payload) {
   try {
     return await prisma.webhookLog.create({
       data: {
         topic,
-        payload,
+        payload: summarizeOrderPaidPayload(payload),
         processed: false,
       },
     });

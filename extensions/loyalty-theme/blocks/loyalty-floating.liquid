@@ -9,9 +9,10 @@
   endif
 
   assign accent_color = block.settings.accent_color | default: '#008060'
+  assign presentment_currency = cart.currency.iso_code | default: localization.country.currency.iso_code | default: shop.currency
 %}
 
-{% capture loyalty_floating_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&surface=floating&accentColor={{ accent_color | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}{% endcapture %}
+{% capture loyalty_floating_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&surface=floating&currencyCode={{ presentment_currency | url_encode }}&accentColor={{ accent_color | url_encode }}&launcherLabel={{ block.settings.launcher_label | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}&cartUpdateUrl={{ routes.cart_url | append: '/update.js' | url_encode }}{% endcapture %}
 
 <div
   class="loyalty-points-widget loyalty-points-widget--floating-iframe"

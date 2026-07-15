@@ -4,7 +4,7 @@
 api_version = "2026-04"
 
 [[extensions]]
-name = "loyalty-account"
+name = "Loyalty Points Balance"
 handle = "loyalty-account"
 type = "ui_extension"
 uid = "8ea3c599-0904-df5e-db42-642a579c982e53dc2001"

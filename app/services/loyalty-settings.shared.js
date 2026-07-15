@@ -42,6 +42,7 @@ export const DEFAULT_LOYALTY_SETTINGS = {
   refundSpendAmount: 100,
   refundSpendPoints: 10,
   checkoutRedemptionEnabled: true,
+  storeCreditRedemptionEnabled: true,
   checkoutRewardLimit: 10,
   preferredIntegration: "theme",
   redemptionRewards: JSON.stringify(DEFAULT_REWARD_OPTIONS),
@@ -95,6 +96,85 @@ export const DEFAULT_LOYALTY_SETTINGS = {
 };
 
 export const REWARD_TYPE_PREFERENCES = ["gift_card", "discount", "both"];
+
+function normalizeIdList(value) {
+  const items = Array.isArray(value) ? value : String(value || "").split(",");
+
+  return [
+    ...new Set(items.map((item) => String(item || "").trim()).filter(Boolean)),
+  ];
+}
+
+function normalizeResourceSelections(value, idsValue) {
+  const selectedItems = Array.isArray(value) ? value : [];
+  const selections = [];
+  const seenIds = new Set();
+
+  selectedItems.forEach((item) => {
+    const id = String(item?.id || "").trim();
+
+    if (!id || seenIds.has(id)) {
+      return;
+    }
+
+    seenIds.add(id);
+    selections.push({
+      id,
+      title: String(item?.title || item?.handle || id.split("/").pop()).trim(),
+    });
+  });
+
+  normalizeIdList(idsValue).forEach((id) => {
+    if (seenIds.has(id)) {
+      return;
+    }
+
+    seenIds.add(id);
+    selections.push({
+      id,
+      title: id.split("/").pop(),
+    });
+  });
+
+  return selections;
+}
+
+export function normalizeRewardConditions(value) {
+  const minSpend = Number(value?.minSpend);
+  const products = normalizeResourceSelections(
+    value?.products,
+    value?.productIds,
+  );
+  const collections = normalizeResourceSelections(
+    value?.collections,
+    value?.collectionIds,
+  );
+  const productIds = products.map((product) => product.id);
+  const collectionIds = collections.map((collection) => collection.id);
+  const conditions = {};
+
+  if (Number.isFinite(minSpend) && minSpend > 0) {
+    conditions.minSpend = minSpend;
+  }
+
+  if (productIds.length > 0) {
+    conditions.productIds = productIds;
+    conditions.products = products;
+  }
+
+  if (collectionIds.length > 0) {
+    conditions.collectionIds = collectionIds;
+    conditions.collections = collections;
+  }
+
+  return conditions;
+}
+
+export function hasRewardConditions(reward) {
+  const conditions = normalizeRewardConditions(reward?.conditions);
+
+  return Object.keys(conditions).length > 0;
+}
 
 export function normalizeRewardTypePreference(value) {
   return REWARD_TYPE_PREFERENCES.includes(value) ? value : "both";
@@ -160,6 +240,13 @@ export function normalizeRewardOptions(value) {
       const type = reward?.type || "discount";
       const discount = Number(reward?.discount);
       const amount = Number(reward?.amount);
+      const conditions = normalizeRewardConditions(reward?.conditions);
+      const ruleData =
+        Object.keys(conditions).length > 0
+          ? {
+              conditions,
+            }
+          : {};
 
       if (!Number.isInteger(points) || points < 1) {
         return null;
@@ -174,6 +261,22 @@ export function normalizeRewardOptions(value) {
           type: "gift_card",
           points,
           amount,
+          ...ruleData,
+        };
+      }
+
+      if (type === "store_credit") {
+        if (!Number.isFinite(amount) || amount <= 0) {
+          return null;
+        }
+
+        return {
+          type: "store_credit",
+          points,
+          amount,
+          title: reward?.title || "Store Credit Reward",
+          description: reward?.description || "Redeem points for store credit",
+          ...ruleData,
         };
       }
 
@@ -185,6 +288,7 @@ export function normalizeRewardOptions(value) {
         type: "discount",
         points,
         discount,
+        ...ruleData,
       };
     })
     .filter(Boolean);
@@ -204,15 +308,26 @@ export function getRewardOptionsWithSpecials(value) {
   const giftCardRewards = configuredRewards.filter(
     (reward) => reward.type === "gift_card",
   );
+  const storeCreditRewards = configuredRewards.filter(
+    (reward) => reward.type === "store_credit",
+  );
   const rewards = [
     ...(discountRewards.length > 0 ? discountRewards : DEFAULT_REWARD_OPTIONS),
     ...(giftCardRewards.length > 0
       ? giftCardRewards
       : DEFAULT_GIFT_CARD_REWARD_OPTIONS),
-    ...SPECIAL_REWARD_OPTIONS,
+    ...(storeCreditRewards.length > 0
+      ? storeCreditRewards
+      : SPECIAL_REWARD_OPTIONS),
   ];
 
   return rewards.sort((a, b) => a.points - b.points);
+}
+
+export function getStoreCreditRewardOption(value) {
+  return getRewardOptionsWithSpecials(value).find(
+    (reward) => reward.type === "store_credit",
+  );
 }
 
 export function filterRewardOptionsByPreference(rewards, preference) {
@@ -257,4 +372,169 @@ export function limitCheckoutRewardOptions(rewards, limit) {
   }
 
   return rewards.slice(0, normalizeCheckoutRewardLimit(limit));
+}
+
+function normalizeRuleId(value) {
+  return String(value || "").trim();
+}
+
+function getComparableIds(value) {
+  const id = normalizeRuleId(value);
+
+  if (!id) {
+    return [];
+  }
+
+  return [id, id.split("/").pop()].filter(Boolean);
+}
+
+function getRuleContextIds(value) {
+  return new Set(
+    normalizeIdList(value).flatMap((item) => getComparableIds(item)),
+  );
+}
+
+export function normalizeRewardRuleContext(value = {}) {
+  const cartSubtotal = Number(value.cartSubtotal ?? value.subtotal ?? 0);
+  const lines = Array.isArray(value.lines) ? value.lines : [];
+  const productIds = new Set();
+  const collectionIds = new Set();
+
+  getRuleContextIds(value.productIds).forEach((id) => productIds.add(id));
+  getRuleContextIds(value.collectionIds).forEach((id) => collectionIds.add(id));
+
+  lines.forEach((line) => {
+    getComparableIds(
+      line?.productId ||
+        line?.product?.id ||
+        line?.merchandise?.product?.id ||
+        line?.merchandise?.productId,
+    ).forEach((id) => productIds.add(id));
+
+    getRuleContextIds(
+      line?.collectionIds ||
+        line?.product?.collectionIds ||
+        line?.merchandise?.product?.collectionIds,
+    ).forEach((id) => collectionIds.add(id));
+  });
+
+  return {
+    cartSubtotal: Number.isFinite(cartSubtotal) ? cartSubtotal : 0,
+    productIds,
+    collectionIds,
+  };
+}
+
+export function isRewardEligibleForRuleContext(reward, ruleContext) {
+  const conditions = normalizeRewardConditions(reward?.conditions);
+
+  if (Object.keys(conditions).length === 0) {
+    return true;
+  }
+
+  const context = normalizeRewardRuleContext(ruleContext);
+
+  if (
+    conditions.minSpend &&
+    Number(context.cartSubtotal || 0) < conditions.minSpend
+  ) {
+    return false;
+  }
+
+  if (
+    conditions.productIds?.length > 0 &&
+    !conditions.productIds.some((id) =>
+      getComparableIds(id).some((comparableId) =>
+        context.productIds.has(comparableId),
+      ),
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    conditions.collectionIds?.length > 0 &&
+    !conditions.collectionIds.some((id) =>
+      getComparableIds(id).some((comparableId) =>
+        context.collectionIds.has(comparableId),
+      ),
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function filterRewardsByRuleContext(rewards, ruleContext) {
+  if (!Array.isArray(rewards)) {
+    return rewards;
+  }
+
+  return rewards.filter((reward) =>
+    isRewardEligibleForRuleContext(reward, ruleContext),
+  );
+}
+
+export function getRewardRuleEligibility(reward, ruleContext) {
+  const conditions = normalizeRewardConditions(reward?.conditions);
+
+  if (Object.keys(conditions).length === 0) {
+    return { eligible: true };
+  }
+
+  const context = normalizeRewardRuleContext(ruleContext);
+  const reasons = [];
+
+  if (
+    conditions.minSpend &&
+    Number(context.cartSubtotal || 0) < conditions.minSpend
+  ) {
+    const cartSubtotal = Number(context.cartSubtotal || 0);
+
+    reasons.push({
+      type: "min_spend",
+      minSpend: conditions.minSpend,
+      cartSubtotal,
+      remainingSpend: Number((conditions.minSpend - cartSubtotal).toFixed(2)),
+    });
+  }
+
+  if (
+    conditions.productIds?.length > 0 &&
+    !conditions.productIds.some((id) =>
+      getComparableIds(id).some((comparableId) =>
+        context.productIds.has(comparableId),
+      ),
+    )
+  ) {
+    reasons.push({ type: "product" });
+  }
+
+  if (
+    conditions.collectionIds?.length > 0 &&
+    !conditions.collectionIds.some((id) =>
+      getComparableIds(id).some((comparableId) =>
+        context.collectionIds.has(comparableId),
+      ),
+    )
+  ) {
+    reasons.push({ type: "collection" });
+  }
+
+  return {
+    eligible: reasons.length === 0,
+    ...(reasons.length > 0 ? { reasons } : {}),
+  };
+}
+
+export function addRewardRuleEligibility(rewards, ruleContext) {
+  if (!Array.isArray(rewards)) {
+    return rewards;
+  }
+
+  return rewards.map((reward) => ({
+    ...reward,
+    ruleEligibility: getRewardRuleEligibility(reward, ruleContext),
+  }));
 }

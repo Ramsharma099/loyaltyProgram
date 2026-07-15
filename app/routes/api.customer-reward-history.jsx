@@ -6,6 +6,10 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
 };
+const ORDER_APPLIED_ACTIVITY_TYPES = new Set([
+  "discount_applied",
+  "gift_card_applied",
+]);
 
 function json(data, init = {}) {
   return Response.json(data, {
@@ -162,11 +166,14 @@ export const loader = async ({ request }) => {
       message: item.message,
       rewardCode: item.rewardCode,
       createdAt: item.createdAt,
-      orderId:
-        getMetadataValue(item.metadata, "orderId") ||
-        item.reward?.orderId ||
-        null,
-      orderName: getMetadataValue(item.metadata, "orderName") || null,
+      orderId: ORDER_APPLIED_ACTIVITY_TYPES.has(item.activityType)
+        ? getMetadataValue(item.metadata, "orderId") ||
+          item.reward?.orderId ||
+          null
+        : null,
+      orderName: ORDER_APPLIED_ACTIVITY_TYPES.has(item.activityType)
+        ? getMetadataValue(item.metadata, "orderName") || null
+        : null,
       pointsUsed:
         item.reward?.pointsUsed ||
         getMetadataValue(item.metadata, "pointsUsed"),

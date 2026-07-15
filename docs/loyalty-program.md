@@ -411,7 +411,25 @@ Important uniqueness rules:
 
 ## 15. Shopify permissions
 
-The configured scopes cover customers, orders, discounts, gift cards, store-credit accounts/transactions, products, and metaobjects. The authoritative list is in `shopify.app.toml` and `shopify.app.production.toml`.
+The configured scopes are limited to the active loyalty features:
+
+- `read_customers`: enroll customers from customer webhooks and associate rewards with Shopify customer IDs.
+- `read_orders`: receive/process order and refund webhooks for points, reward settlement, and refund handling.
+- `read_products`: let merchants select products/collections for optional reward eligibility rules.
+- `write_discounts`: create loyalty discount codes.
+- `write_gift_cards`: issue gift-card rewards.
+- `read_store_credit_accounts`: show a customer's current Shopify store-credit balance.
+- `write_store_credit_account_transactions`: add store credit when a customer redeems points.
+
+Template-only product metafield and metaobject configuration has been removed because the loyalty app does not use product writes or metaobjects.
+
+Customer data is limited to what the loyalty program needs:
+
+- Shopify customer ID, name, and email for the local loyalty customer record and merchant-facing customer list.
+- Order IDs, order names, totals, and timestamps from order/refund webhooks for point earning, reward settlement, and refund handling.
+- Reward activity data such as points used, reward type, generated reward code, order ID/name, and status.
+
+The app does not need product writes, metaobjects, saved full order webhook payloads, or gift-card reads. `orders/paid` webhook logs store only a compact processing summary instead of the full order payload.
 
 After changing scopes, deploy the Shopify configuration and reinstall or approve the new permissions when Shopify requests it.
 
@@ -539,4 +557,3 @@ Confirm `LOYALTY_APP_URL`, `PUBLIC_STORE_DOMAIN`, and the shared Hydrogen token 
 - Hydrogen authentication: `app/services/hydrogen-api.server.js`
 - Database: `prisma/schema.prisma`
 - Shopify configuration: `shopify.app.toml`
-

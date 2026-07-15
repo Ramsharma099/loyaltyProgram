@@ -16,17 +16,17 @@ import { filterLoyaltySettingData } from "../services/loyalty-settings.server";
 import {
   DEFAULT_GIFT_CARD_REWARD_OPTIONS,
   DEFAULT_LOYALTY_SETTINGS,
+  SPECIAL_REWARD_OPTIONS,
   getRewardTypePreferenceFromSettings,
   getRewardOptionsForPreference,
+  normalizeRewardConditions,
   normalizeCheckoutRewardLimit,
   normalizeRewardOptions,
   normalizeRewardTypePreference,
   serializeRewardSettings,
 } from "../services/loyalty-settings.shared";
 import { INTEGRATION_OPTIONS } from "../services/integrations.shared";
-import {
-  getEffectiveIntegration,
-} from "../services/shop-plan.server";
+import { getEffectiveIntegration } from "../services/shop-plan.server";
 import { logError } from "../services/errors.server";
 import { ensurePlanAwareLoyaltySetup } from "../services/loyalty-installation.server";
 import { getPublicRequestOrigin } from "../services/webhook-subscriptions.server";
@@ -37,33 +37,38 @@ const SETTING_FIELDS = [
     label: "Signup bonus",
     suffix: "points",
     help: "Credit when a customer joins loyalty.",
-    description: "Points awarded to customers when they first join your loyalty program.",
+    description:
+      "Points awarded to customers when they first join your loyalty program.",
   },
   {
     name: "orderSpendAmount",
     label: "Order spend amount",
     help: "Spend threshold for order points.",
-    description: "The minimum order amount required for customers to earn order points. Points are awarded for each threshold reached.",
+    description:
+      "The minimum order amount required for customers to earn order points. Points are awarded for each threshold reached.",
   },
   {
     name: "orderSpendPoints",
     label: "Order points",
     suffix: "points",
     help: "Credit for every spend threshold reached.",
-    description: "Points earned by customers for each order spend threshold they reach.",
+    description:
+      "Points earned by customers for each order spend threshold they reach.",
   },
   {
     name: "refundSpendAmount",
     label: "Refund amount",
     help: "Refund threshold for reversing points.",
-    description: "The minimum refund amount that triggers point reversal. Points are deducted for each threshold reached.",
+    description:
+      "The minimum refund amount that triggers point reversal. Points are deducted for each threshold reached.",
   },
   {
     name: "refundSpendPoints",
     label: "Refund points",
     suffix: "points",
     help: "Debit for every refund threshold reached.",
-    description: "Points deducted from customers for each refund threshold they reach.",
+    description:
+      "Points deducted from customers for each refund threshold they reach.",
   },
 ];
 
@@ -243,11 +248,17 @@ const REWARD_FIELD_CONFIG = {
       {
         points: "",
         discount: "",
+        minSpend: "",
+        products: [],
+        collections: [],
       },
     ],
     emptyRow: {
       points: "",
       discount: "",
+      minSpend: "",
+      products: [],
+      collections: [],
     },
     heading: "Discount reward options",
     pointsName: "discountRewardPoints",
@@ -264,16 +275,50 @@ const REWARD_FIELD_CONFIG = {
     defaultRows: DEFAULT_GIFT_CARD_REWARD_OPTIONS.map((reward) => ({
       points: String(reward.points),
       amount: String(reward.amount),
+      minSpend: "",
+      products: [],
+      collections: [],
     })),
     emptyRow: {
       points: "",
       amount: "",
+      minSpend: "",
+      products: [],
+      collections: [],
     },
     heading: "Gift card reward options",
     pointsName: "giftCardRewardPoints",
     pointsErrorPrefix: "giftCardRewardPoints",
     rewardType: "gift_card",
     valueLabel: "gift card",
+  },
+  store_credit: {
+    allowRules: false,
+    amountKey: "amount",
+    amountName: "storeCreditRewardAmounts",
+    amountLabel: "Store credit amount",
+    amountErrorPrefix: "storeCreditRewardAmounts",
+    amountSummaryLabel: "Total store credit value",
+    defaultRows: SPECIAL_REWARD_OPTIONS.map((reward) => ({
+      points: String(reward.points),
+      amount: String(reward.amount),
+      minSpend: "",
+      products: [],
+      collections: [],
+    })),
+    emptyRow: {
+      points: "",
+      amount: "",
+      minSpend: "",
+      products: [],
+      collections: [],
+    },
+    heading: "Store credit reward options",
+    pointsName: "storeCreditRewardPoints",
+    pointsErrorPrefix: "storeCreditRewardPoints",
+    rewardType: "store_credit",
+    singleRow: true,
+    valueLabel: "store credit",
   },
 };
 
@@ -288,22 +333,99 @@ function getEditableRewardRows(value, rewardType) {
     return config.defaultRows;
   }
 
-  return typedRewards.map((reward) => ({
+  const editableRewards = config.singleRow
+    ? typedRewards.slice(0, 1)
+    : typedRewards;
+
+  return editableRewards.map((reward) => ({
     points: String(reward.points),
     [config.amountKey]: String(reward[config.amountKey]),
+    minSpend: reward.conditions?.minSpend
+      ? String(reward.conditions.minSpend)
+      : "",
+    products: getConditionResourceSelections(reward.conditions, "product"),
+    collections: getConditionResourceSelections(
+      reward.conditions,
+      "collection",
+    ),
   }));
+}
+
+function getConditionResourceSelections(conditions, type) {
+  const selectionKey = type === "product" ? "products" : "collections";
+  const idKey = type === "product" ? "productIds" : "collectionIds";
+
+  if (Array.isArray(conditions?.[selectionKey])) {
+    return conditions[selectionKey]
+      .map((item) => ({
+        id: String(item?.id || "").trim(),
+        title: String(item?.title || item?.id || "").trim(),
+      }))
+      .filter((item) => item.id);
+  }
+
+  if (!Array.isArray(conditions?.[idKey])) {
+    return [];
+  }
+
+  return conditions[idKey]
+    .map((id) => String(id || "").trim())
+    .filter(Boolean)
+    .map((id) => ({
+      id,
+      title: id.split("/").pop(),
+    }));
+}
+
+function parseResourceSelections(value) {
+  try {
+    const parsed = JSON.parse(value || "[]");
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((item) => ({
+        id: String(item?.id || "").trim(),
+        title: String(item?.title || item?.id || "").trim(),
+      }))
+      .filter((item) => item.id);
+  } catch {
+    return [];
+  }
 }
 
 function getSubmittedRewardRows(formData, rewardType) {
   const config = REWARD_FIELD_CONFIG[rewardType];
   const points = formData.getAll(config.pointsName);
   const amounts = formData.getAll(config.amountName);
-  const rowCount = Math.max(points.length, amounts.length);
+  const minSpend = formData.getAll(`${rewardType}RewardMinSpend`);
+  const products = formData.getAll(`${rewardType}RewardProducts`);
+  const collections = formData.getAll(`${rewardType}RewardCollections`);
+  const rowCount = Math.max(
+    points.length,
+    amounts.length,
+    minSpend.length,
+    products.length,
+    collections.length,
+  );
 
-  return Array.from({ length: rowCount }, (_, index) => ({
+  const rows = Array.from({ length: rowCount }, (_, index) => ({
     points: String(points[index] || "").trim(),
     [config.amountKey]: String(amounts[index] || "").trim(),
+    minSpend: String(minSpend[index] || "").trim(),
+    products: parseResourceSelections(products[index]),
+    collections: parseResourceSelections(collections[index]),
   }));
+
+  return config.singleRow ? rows.slice(0, 1) : rows;
+}
+
+function hasRewardRuleInput(row) {
+  return Boolean(
+    row.minSpend || row.products?.length > 0 || row.collections?.length > 0,
+  );
 }
 
 function parseRewardRows(rows, rewardType, { requireRewards = true } = {}) {
@@ -314,13 +436,15 @@ function parseRewardRows(rows, rewardType, { requireRewards = true } = {}) {
   rows.forEach((row, index) => {
     const hasPoints = row.points !== "";
     const hasAmount = row[config.amountKey] !== "";
+    const hasRules = hasRewardRuleInput(row);
 
-    if (!hasPoints && !hasAmount) {
+    if (!hasPoints && !hasAmount && !hasRules) {
       return;
     }
 
     const points = Number(row.points);
     const amount = Number(row[config.amountKey]);
+    const minSpend = Number(row.minSpend);
 
     if (!Number.isInteger(points) || points < 1) {
       errors[`${config.pointsErrorPrefix}.${index}`] =
@@ -329,30 +453,40 @@ function parseRewardRows(rows, rewardType, { requireRewards = true } = {}) {
 
     if (!Number.isFinite(amount) || amount <= 0) {
       errors[`${config.amountErrorPrefix}.${index}`] =
-        rewardType === "gift_card"
-          ? "Enter a gift card amount greater than 0."
-          : "Enter a discount greater than 0.";
+        rewardType === "discount"
+          ? "Enter a discount greater than 0."
+          : `Enter a ${config.valueLabel} amount greater than 0.`;
+    }
+
+    if (row.minSpend && (!Number.isFinite(minSpend) || minSpend <= 0)) {
+      errors[`${rewardType}RewardMinSpend.${index}`] =
+        "Enter a spend amount greater than 0.";
     }
 
     if (
       Number.isInteger(points) &&
       points > 0 &&
       Number.isFinite(amount) &&
-      amount > 0
+      amount > 0 &&
+      (!row.minSpend || (Number.isFinite(minSpend) && minSpend > 0))
     ) {
+      const conditions = normalizeRewardConditions({
+        minSpend: row.minSpend,
+        products: row.products,
+        collections: row.collections,
+      });
+
       rewards.push({
         type: config.rewardType,
         points,
         [config.amountKey]: amount,
+        ...(Object.keys(conditions).length > 0 ? { conditions } : {}),
       });
     }
   });
 
   if (requireRewards && rewards.length === 0) {
-    errors.redemptionRewards =
-      rewardType === "gift_card"
-        ? "Add at least one gift card reward."
-        : "Add at least one discount reward.";
+    errors.redemptionRewards = `Add at least one ${config.valueLabel} reward.`;
   }
 
   if (Object.keys(errors).length > 0) {
@@ -700,13 +834,15 @@ function buildHeadlessApiSections(apiBaseUrl, shop) {
           name: "customerId",
           type: "string",
           defaultValue: "-",
-          description: "App customer ID, Shopify customer ID, or Customer GID. Required.",
+          description:
+            "App customer ID, Shopify customer ID, or Customer GID. Required.",
         },
         {
           name: "shop",
           type: "string",
           defaultValue: "-",
-          description: "Your Shopify store domain. Required for Shopify customer IDs.",
+          description:
+            "Your Shopify store domain. Required for Shopify customer IDs.",
         },
         {
           name: "pointsToRedeem",
@@ -718,7 +854,8 @@ function buildHeadlessApiSections(apiBaseUrl, shop) {
           name: "rewardType",
           type: "string",
           defaultValue: "discount",
-          description: "Reward type. Values: discount / gift_card / store_credit.",
+          description:
+            "Reward type. Values: discount / gift_card / store_credit.",
         },
       ],
       bodyExample: `{
@@ -818,13 +955,15 @@ function buildHeadlessApiSections(apiBaseUrl, shop) {
           name: "customerId",
           type: "string",
           defaultValue: "-",
-          description: "App customer ID, Shopify customer ID, or Customer GID. Required.",
+          description:
+            "App customer ID, Shopify customer ID, or Customer GID. Required.",
         },
         {
           name: "shop",
           type: "string",
           defaultValue: "-",
-          description: "Your Shopify store domain. Required for Shopify customer IDs.",
+          description:
+            "Your Shopify store domain. Required for Shopify customer IDs.",
         },
         {
           name: "pointsToRedeem",
@@ -836,7 +975,8 @@ function buildHeadlessApiSections(apiBaseUrl, shop) {
           name: "rewardType",
           type: "string",
           defaultValue: "discount",
-          description: "Reward type. Values: discount / gift_card / store_credit.",
+          description:
+            "Reward type. Values: discount / gift_card / store_credit.",
         },
       ],
       bodyExample: `{
@@ -871,8 +1011,7 @@ function buildIframeWidgetSections(apiBaseUrl, shop) {
   style="width: 100%; height: 520px; border: 0; border-radius: 8px; display: block;"
   title="Loyalty rewards"
 ></iframe>`,
-      details:
-        "Use this when you need the standard loyalty iframe.",
+      details: "Use this when you need the standard loyalty iframe.",
     },
     {
       title: "Floating rewards iframe",
@@ -941,14 +1080,26 @@ function InfoIcon({ tooltip }) {
         fill="currentColor"
         aria-hidden="true"
       >
-        <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
-        <text x="12" y="17" textAnchor="middle" fontSize="12" fontWeight="bold" fill="currentColor">i</text>
+        <circle
+          cx="12"
+          cy="12"
+          r="10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <text
+          x="12"
+          y="17"
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight="bold"
+          fill="currentColor"
+        >
+          i
+        </text>
       </svg>
-      {isTooltipVisible && (
-        <div className="tooltip-popup">
-          {tooltip}
-        </div>
-      )}
+      {isTooltipVisible && <div className="tooltip-popup">{tooltip}</div>}
     </span>
   );
 }
@@ -1067,7 +1218,9 @@ function IframeWidgetCard({ widget, initiallyOpen = false }) {
               type="button"
               onClick={() => copyValue(widget.iframeHtml)}
             >
-              {copiedValue === widget.iframeHtml ? "Copied" : "Copy iframe code"}
+              {copiedValue === widget.iframeHtml
+                ? "Copied"
+                : "Copy iframe code"}
             </s-button>
           </div>
           <pre>{widget.iframeHtml}</pre>
@@ -1077,7 +1230,105 @@ function IframeWidgetCard({ widget, initiallyOpen = false }) {
   );
 }
 
-function RewardTierOptions({ currencyCode, errors, initialRows, rewardType }) {
+function getPickedResourceTitle(resource) {
+  return String(
+    resource?.title || resource?.handle || resource?.id || "",
+  ).trim();
+}
+
+function normalizePickedResources(resources) {
+  if (!Array.isArray(resources)) {
+    return [];
+  }
+
+  const seenIds = new Set();
+
+  return resources
+    .map((resource) => ({
+      id: String(resource?.id || "").trim(),
+      title: getPickedResourceTitle(resource),
+    }))
+    .filter((resource) => {
+      if (!resource.id || seenIds.has(resource.id)) {
+        return false;
+      }
+
+      seenIds.add(resource.id);
+      return true;
+    });
+}
+
+function RewardResourcePicker({
+  label,
+  name,
+  resourceType,
+  selectedResources,
+  onChange,
+}) {
+  const resources = Array.isArray(selectedResources) ? selectedResources : [];
+
+  const openPicker = async () => {
+    const resourcePicker = window.shopify?.resourcePicker;
+
+    if (!resourcePicker) {
+      return;
+    }
+
+    const pickedResources = await resourcePicker({
+      type: resourceType,
+      multiple: true,
+      selectionIds: resources.map((resource) => ({ id: resource.id })),
+    });
+
+    if (pickedResources) {
+      onChange(normalizePickedResources(pickedResources));
+    }
+  };
+
+  const removeResource = (id) => {
+    onChange(resources.filter((resource) => resource.id !== id));
+  };
+
+  return (
+    <div className="reward-resource-picker">
+      <input type="hidden" name={name} value={JSON.stringify(resources)} />
+      <div className="reward-resource-picker__heading">
+        <span>{label}</span>
+        <s-button type="button" onClick={openPicker}>
+          Select
+        </s-button>
+      </div>
+      {resources.length > 0 ? (
+        <div className="reward-resource-chips">
+          {resources.map((resource) => (
+            <span className="reward-resource-chip" key={resource.id}>
+              <span>{resource.title || resource.id.split("/").pop()}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${resource.title || resource.id}`}
+                onClick={() => removeResource(resource.id)}
+              >
+                x
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <small>No {resourceType}s selected</small>
+      )}
+    </div>
+  );
+}
+
+function RewardTierOptions({
+  currencyCode,
+  enabled = true,
+  errors,
+  initialRows,
+  onEnabledChange,
+  rewardType,
+  showEnableToggle = false,
+}) {
   const config = REWARD_FIELD_CONFIG[rewardType];
   const [rewardRows, setRewardRows] = useState(initialRows);
   const activeRewardCount = rewardRows.filter(
@@ -1115,15 +1366,52 @@ function RewardTierOptions({ currencyCode, errors, initialRows, rewardType }) {
       <div className="reward-options-heading">
         <div>
           <h3>{config.heading}</h3>
-          <p>Add each reward tier customers can redeem with loyalty points.</p>
+          <p>
+            {config.singleRow
+              ? "Set the points-to-credit conversion rate customers can redeem."
+              : "Add each reward tier customers can redeem with loyalty points."}
+          </p>
         </div>
-        <div className="reward-options-action">
-          <s-button type="button" variant="primary" onClick={addRewardRow}>
-            Add tier
-          </s-button>
-        </div>
+        {!showEnableToggle && !config.singleRow ? (
+          <div className="reward-options-action">
+            <s-button type="button" variant="primary" onClick={addRewardRow}>
+              Add tier
+            </s-button>
+          </div>
+        ) : null}
       </div>
 
+      {showEnableToggle ? (
+        <div className="redemption-toggle">
+          <input
+            id="storeCreditRedemptionEnabled"
+            type="checkbox"
+            name="storeCreditRedemptionEnabled"
+            value="true"
+            checked={enabled}
+            onChange={(event) => onEnabledChange?.(event.target.checked)}
+          />
+          <div>
+            <label htmlFor="storeCreditRedemptionEnabled">
+              Enable store credit
+            </label>
+            <p>
+              Customers can convert loyalty points into Shopify store credit.
+            </p>
+          </div>
+          <span>{enabled ? "On" : "Off"}</span>
+        </div>
+      ) : null}
+
+      {!enabled ? (
+        <div className="reward-options-paused">
+          Store credit rewards are disabled. Turn this on to edit the
+          points-to-credit conversion rate.
+        </div>
+      ) : null}
+
+      {enabled ? (
+        <>
       <div className="summary-strip">
         <div>
           <span>Configured tiers</span>
@@ -1160,13 +1448,15 @@ function RewardTierOptions({ currencyCode, errors, initialRows, rewardType }) {
                 justifyContent="space-between"
               >
                 <s-text type="strong">Reward {index + 1}</s-text>
-                <s-button
-                  type="button"
-                  tone="critical"
-                  onClick={() => deleteRewardRow(index)}
-                >
-                  Remove
-                </s-button>
+                {!config.singleRow ? (
+                  <s-button
+                    type="button"
+                    tone="critical"
+                    onClick={() => deleteRewardRow(index)}
+                  >
+                    Remove
+                  </s-button>
+                ) : null}
               </s-stack>
               <s-number-field
                 label="Points required"
@@ -1197,10 +1487,50 @@ function RewardTierOptions({ currencyCode, errors, initialRows, rewardType }) {
                   errors[`${config.amountErrorPrefix}.${index}`] || undefined
                 }
               ></s-number-field>
+              {config.allowRules !== false ? (
+                <div className="reward-rule-fields">
+                  <s-number-field
+                    label="Minimum cart spend"
+                    name={`${rewardType}RewardMinSpend`}
+                    min="0.01"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={reward.minSpend || ""}
+                    details="Optional spend condition for this reward."
+                    onInput={(event) =>
+                      updateRewardRow(index, "minSpend", event.target.value)
+                    }
+                    error={
+                      errors[`${rewardType}RewardMinSpend.${index}`] ||
+                      undefined
+                    }
+                  ></s-number-field>
+                  <RewardResourcePicker
+                    label="Products"
+                    name={`${rewardType}RewardProducts`}
+                    resourceType="product"
+                    selectedResources={reward.products}
+                    onChange={(resources) =>
+                      updateRewardRow(index, "products", resources)
+                    }
+                  />
+                  <RewardResourcePicker
+                    label="Collections"
+                    name={`${rewardType}RewardCollections`}
+                    resourceType="collection"
+                    selectedResources={reward.collections}
+                    onChange={(resources) =>
+                      updateRewardRow(index, "collections", resources)
+                    }
+                  />
+                </div>
+              ) : null}
             </s-stack>
           </div>
         ))}
       </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1256,7 +1586,7 @@ export const loader = async ({ request }) => {
       shop: session.shop,
       hydrogenTokenConfigured: Boolean(
         process.env.HYDROGEN_LOYALTY_API_TOKEN ||
-          process.env.LOYALTY_HYDROGEN_API_TOKEN,
+        process.env.LOYALTY_HYDROGEN_API_TOKEN,
       ),
     },
   });
@@ -1293,6 +1623,10 @@ export const action = async ({ request }) => {
 
   const discountRewardRows = getSubmittedRewardRows(formData, "discount");
   const giftCardRewardRows = getSubmittedRewardRows(formData, "gift_card");
+  const storeCreditRewardRows = getSubmittedRewardRows(
+    formData,
+    "store_credit",
+  );
   values.rewardTypePreference = normalizeRewardTypePreference(
     formData.get("rewardTypePreference"),
   );
@@ -1312,11 +1646,23 @@ export const action = async ({ request }) => {
       requireRewards: requiresGiftCardRewards,
     },
   );
+  const parsedStoreCreditRewards = parseRewardRows(
+    storeCreditRewardRows,
+    "store_credit",
+    {
+      requireRewards: formData
+        .getAll("storeCreditRedemptionEnabled")
+        .includes("true"),
+    },
+  );
   values.preferredIntegration = checkoutAvailable
     ? INTEGRATION_OPTIONS.CHECKOUT
     : INTEGRATION_OPTIONS.THEME;
   values.checkoutRedemptionEnabled = formData
     .getAll("checkoutRedemptionEnabled")
+    .includes("true");
+  values.storeCreditRedemptionEnabled = formData
+    .getAll("storeCreditRedemptionEnabled")
     .includes("true");
   const checkoutRewardLimit = parseCheckoutRewardLimit(formData);
 
@@ -1343,11 +1689,16 @@ export const action = async ({ request }) => {
     values.iframeFontSize = iframeFontSize;
   }
 
-  if (!parsedDiscountRewards.rewards || !parsedGiftCardRewards.rewards) {
+  if (
+    !parsedDiscountRewards.rewards ||
+    !parsedGiftCardRewards.rewards ||
+    !parsedStoreCreditRewards.rewards
+  ) {
     Object.assign(
       errors,
       parsedDiscountRewards.errors,
       parsedGiftCardRewards.errors,
+      parsedStoreCreditRewards.errors,
     );
   } else {
     const currentRedemptionRewards =
@@ -1361,15 +1712,26 @@ export const action = async ({ request }) => {
       currentRedemptionRewards,
       "gift_card",
     );
+    const existingStoreCreditRewards = getConfiguredRewardsByType(
+      currentRedemptionRewards,
+      "store_credit",
+    );
     const discountRewards = requiresDiscountRewards
       ? parsedDiscountRewards.rewards
       : existingDiscountRewards;
     const giftCardRewards = requiresGiftCardRewards
       ? parsedGiftCardRewards.rewards
       : existingGiftCardRewards;
+    const storeCreditRewards = values.storeCreditRedemptionEnabled
+      ? parsedStoreCreditRewards.rewards
+      : existingStoreCreditRewards;
 
     values.redemptionRewards = serializeRewardSettings(
-      [...discountRewards, ...giftCardRewards],
+      [
+        ...discountRewards,
+        ...giftCardRewards,
+        ...storeCreditRewards,
+      ],
       values.rewardTypePreference,
     );
   }
@@ -1381,10 +1743,12 @@ export const action = async ({ request }) => {
         values: {
           ...Object.fromEntries(formData),
           checkoutRedemptionEnabled: values.checkoutRedemptionEnabled,
+          storeCreditRedemptionEnabled: values.storeCreditRedemptionEnabled,
           preferredIntegration: values.preferredIntegration,
           rewardTypePreference: values.rewardTypePreference,
           discountRewardRows,
           giftCardRewardRows,
+          storeCreditRewardRows,
         },
         shopPlan: {
           name: planShop.shopifyPlanName || "Unknown",
@@ -1476,6 +1840,9 @@ export default function LoyaltySettingsPage() {
   const giftCardRewardRows =
     values.giftCardRewardRows ||
     getEditableRewardRows(currentSettings.redemptionRewards, "gift_card");
+  const storeCreditRewardRows =
+    values.storeCreditRewardRows ||
+    getEditableRewardRows(currentSettings.redemptionRewards, "store_credit");
   const fieldsByName = Object.fromEntries(
     SETTING_FIELDS.map((field) => [field.name, field]),
   );
@@ -1483,6 +1850,12 @@ export default function LoyaltySettingsPage() {
     values,
     "checkoutRedemptionEnabled",
   );
+  const storeCreditRedemptionEnabled = getBooleanSettingValue(
+    values,
+    "storeCreditRedemptionEnabled",
+  );
+  const [isStoreCreditRedemptionEnabled, setIsStoreCreditRedemptionEnabled] =
+    useState(storeCreditRedemptionEnabled);
   const [selectedRewardTypePreference, setSelectedRewardTypePreference] =
     useState(() => getRewardTypePreferenceValue(values));
   const [iframeAppearance, setIframeAppearance] = useState(() =>
@@ -1499,12 +1872,18 @@ export default function LoyaltySettingsPage() {
     values.iframeFontSize,
     values.iframeCustomCss,
   ]);
+  useEffect(() => {
+    setIsStoreCreditRedemptionEnabled(storeCreditRedemptionEnabled);
+  }, [storeCreditRedemptionEnabled]);
   const rewardTypePreference = selectedRewardTypePreference;
   const showDiscountRewards = rewardTypePreference !== "gift_card";
   const showGiftCardRewards = rewardTypePreference !== "discount";
   const visibleRewardOptions = getRewardOptionsForPreference(
     currentSettings.redemptionRewards,
     rewardTypePreference,
+  ).filter(
+    (reward) =>
+      isStoreCreditRedemptionEnabled || reward.type !== "store_credit",
   );
   const checkoutRewardLimit = normalizeCheckoutRewardLimit(
     values.checkoutRewardLimit,
@@ -1563,109 +1942,109 @@ export default function LoyaltySettingsPage() {
               className="settings-panel"
               aria-labelledby="point-rules-title"
             >
-            <div className="settings-panel-header">
-              <div>
-                <h2 id="point-rules-title">Point rules</h2>
-                <p>Control how customers earn and lose loyalty points.</p>
+              <div className="settings-panel-header">
+                <div>
+                  <h2 id="point-rules-title">Point rules</h2>
+                  <p>Control how customers earn and lose loyalty points.</p>
+                </div>
               </div>
-            </div>
 
-            <Form method="post">
-              <input
-                type="hidden"
-                name="currentRedemptionRewards"
-                value={currentSettings.redemptionRewards}
-              />
-              {IFRAME_COLOR_FIELDS.map((field) => (
+              <Form method="post">
                 <input
-                  key={field.name}
                   type="hidden"
-                  name={field.name}
-                  value={iframeAppearance[field.name]}
+                  name="currentRedemptionRewards"
+                  value={currentSettings.redemptionRewards}
                 />
-              ))}
-              <input
-                type="hidden"
-                name="iframeFontFamily"
-                value={iframeAppearance.iframeFontFamily}
-              />
-              <input
-                type="hidden"
-                name="iframeFontSize"
-                value={iframeAppearance.iframeFontSize}
-              />
-              <s-stack gap="base">
-                {RULE_GROUPS.map((group) => (
-                  <section className="rule-section" key={group.title}>
-                    <div className="rule-section-header">
-                      <div>
-                        <h3>{group.title}</h3>
-                        <p>{group.description}</p>
-                      </div>
-                    </div>
-
-                    <div className="rule-field-grid">
-                      {group.fields.map((fieldName) => {
-                        const field = fieldsByName[fieldName];
-
-                        return (
-                          <div className="rule-field" key={field.name}>
-                            <div className="field-label-with-info">
-                              <span>{field.label}</span>
-                              <InfoIcon tooltip={field.description} />
-                            </div>
-                            <s-number-field
-                              label={field.label}
-                              name={field.name}
-                              min="1"
-                              step="1"
-                              inputMode="numeric"
-                              value={getSettingValue(values, field.name)}
-                              suffix={field.suffix}
-                              details={field.help}
-                              error={errors[field.name] || undefined}
-                              required
-                            ></s-number-field>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
+                {IFRAME_COLOR_FIELDS.map((field) => (
+                  <input
+                    key={field.name}
+                    type="hidden"
+                    name={field.name}
+                    value={iframeAppearance[field.name]}
+                  />
                 ))}
-
-                <section className="rule-section">
-                  <s-stack gap="base">
-                    <div className="rule-section-header">
-                      <div>
-                        <h3>Redemption rewards</h3>
-                        <p>
-                          Configure reward redemption availability, discount
-                          tiers, and gift card tiers.
-                        </p>
+                <input
+                  type="hidden"
+                  name="iframeFontFamily"
+                  value={iframeAppearance.iframeFontFamily}
+                />
+                <input
+                  type="hidden"
+                  name="iframeFontSize"
+                  value={iframeAppearance.iframeFontSize}
+                />
+                <s-stack gap="base">
+                  {RULE_GROUPS.map((group) => (
+                    <section className="rule-section" key={group.title}>
+                      <div className="rule-section-header">
+                        <div>
+                          <h3>{group.title}</h3>
+                          <p>{group.description}</p>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="redemption-toggle">
-                      <input
-                        id="checkoutRedemptionEnabled"
-                        type="checkbox"
-                        name="checkoutRedemptionEnabled"
-                        value="true"
-                        defaultChecked={redemptionEnabled}
-                      />
-                      <div>
-                        <label htmlFor="checkoutRedemptionEnabled">
-                          Allow rewards redemption
-                        </label>
-                        <p>
-                          Customers can redeem rewards wherever the app is
-                          available for their store plan.
-                        </p>
+                      <div className="rule-field-grid">
+                        {group.fields.map((fieldName) => {
+                          const field = fieldsByName[fieldName];
+
+                          return (
+                            <div className="rule-field" key={field.name}>
+                              <div className="field-label-with-info">
+                                <span>{field.label}</span>
+                                <InfoIcon tooltip={field.description} />
+                              </div>
+                              <s-number-field
+                                label={field.label}
+                                name={field.name}
+                                min="1"
+                                step="1"
+                                inputMode="numeric"
+                                value={getSettingValue(values, field.name)}
+                                suffix={field.suffix}
+                                details={field.help}
+                                error={errors[field.name] || undefined}
+                                required
+                              ></s-number-field>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <span>{redemptionEnabled ? "On" : "Off"}</span>
-                    </div>
+                    </section>
+                  ))}
 
-                    <div className="checkout-limit-field">
+                  <section className="rule-section">
+                    <s-stack gap="base">
+                      <div className="rule-section-header">
+                        <div>
+                          <h3>Redemption rewards</h3>
+                          <p>
+                            Configure reward redemption availability, discount
+                            tiers, gift card tiers, and store credit.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="redemption-toggle">
+                        <input
+                          id="checkoutRedemptionEnabled"
+                          type="checkbox"
+                          name="checkoutRedemptionEnabled"
+                          value="true"
+                          defaultChecked={redemptionEnabled}
+                        />
+                        <div>
+                          <label htmlFor="checkoutRedemptionEnabled">
+                            Allow rewards redemption
+                          </label>
+                          <p>
+                            Customers can redeem rewards wherever the app is
+                            available for their store plan.
+                          </p>
+                        </div>
+                        <span>{redemptionEnabled ? "On" : "Off"}</span>
+                      </div>
+
+                      <div className="checkout-limit-field">
                         <s-number-field
                           label="Reward options shown"
                           name="checkoutRewardLimit"
@@ -1679,199 +2058,213 @@ export default function LoyaltySettingsPage() {
                           error={errors.checkoutRewardLimit || undefined}
                           required
                         ></s-number-field>
-                    </div>
-
-                    <div className="reward-type-options">
-                      {REWARD_TYPE_CHOICES.map((choice) => (
-                        <label
-                          className="reward-type-option"
-                          key={choice.value}
-                          htmlFor={`rewardTypePreference-${choice.value}`}
-                        >
-                          <input
-                            id={`rewardTypePreference-${choice.value}`}
-                            type="radio"
-                            name="rewardTypePreference"
-                            value={choice.value}
-                            aria-label={choice.label}
-                            checked={rewardTypePreference === choice.value}
-                            onChange={(event) =>
-                              setSelectedRewardTypePreference(
-                                normalizeRewardTypePreference(
-                                  event.target.value,
-                                ),
-                              )
-                            }
-                          />
-                          <span>
-                            <strong>{choice.label}</strong>
-                            <small>{choice.description}</small>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-
-                    {showDiscountRewards ? (
-                      <RewardTierOptions
-                        key={`discount-${JSON.stringify(discountRewardRows)}`}
-                        currencyCode={currencyCode}
-                        errors={errors}
-                        initialRows={discountRewardRows}
-                        rewardType="discount"
-                      />
-                    ) : null}
-
-                    {showGiftCardRewards ? (
-                      <RewardTierOptions
-                        key={`gift_card-${JSON.stringify(giftCardRewardRows)}`}
-                        currencyCode={currencyCode}
-                        errors={errors}
-                        initialRows={giftCardRewardRows}
-                        rewardType="gift_card"
-                      />
-                    ) : null}
-
-                    {errors.redemptionRewards ? (
-                      <s-text tone="critical">
-                        {errors.redemptionRewards}
-                      </s-text>
-                    ) : (
-                      <s-text type="small">
-                        Complete both fields in a row before saving. Empty rows
-                        are ignored.
-                      </s-text>
-                    )}
-                  </s-stack>
-                </section>
-
-                <section className="rule-section">
-                  <s-stack gap="base">
-                    <div className="rule-section-header">
-                      <div>
-                        <h3>Iframe appearance</h3>
-                        <p>
-                          Customize the copy and colors used by iframe embeds
-                          for theme, Hydrogen, and customer account pages.
-                        </p>
                       </div>
-                    </div>
 
-                    <div className="iframe-text-grid">
-                      {IFRAME_TEXT_FIELDS.map((field) => (
-                        <s-text-field
-                          key={field.name}
-                          label={field.label}
-                          name={field.name}
-                          value={getSettingValue(values, field.name)}
-                          details={field.details}
-                        ></s-text-field>
-                      ))}
-                    </div>
-
-                    <div className="iframe-color-grid">
-                      {IFRAME_COLOR_FIELDS.map((field) => {
-                        const value = iframeAppearance[field.name];
-
-                        return (
-                          <label className="iframe-color-field" key={field.name}>
-                            <span>{field.label}</span>
-                            <div>
-                              <input
-                                type="color"
-                                value={value}
-                                aria-label={field.label}
-                                onChange={(event) =>
-                                  setIframeAppearance((current) => ({
-                                    ...current,
-                                    [field.name]: event.target.value,
-                                  }))
-                                }
-                              />
-                              <code>{value}</code>
-                            </div>
+                      <div className="reward-type-options">
+                        {REWARD_TYPE_CHOICES.map((choice) => (
+                          <label
+                            className="reward-type-option"
+                            key={choice.value}
+                            htmlFor={`rewardTypePreference-${choice.value}`}
+                          >
+                            <input
+                              id={`rewardTypePreference-${choice.value}`}
+                              type="radio"
+                              name="rewardTypePreference"
+                              value={choice.value}
+                              aria-label={choice.label}
+                              checked={rewardTypePreference === choice.value}
+                              onChange={(event) =>
+                                setSelectedRewardTypePreference(
+                                  normalizeRewardTypePreference(
+                                    event.target.value,
+                                  ),
+                                )
+                              }
+                            />
+                            <span>
+                              <strong>{choice.label}</strong>
+                              <small>{choice.description}</small>
+                            </span>
                           </label>
-                        );
-                      })}
-                    </div>
-
-                    <div className="iframe-font-grid">
-                      <s-select
-                        label="Font family"
-                        details="Choose from web-safe options and commonly used Google fonts."
-                        value={iframeAppearance.iframeFontFamily}
-                        onChange={(event) =>
-                          setIframeAppearance((current) => ({
-                            ...current,
-                            iframeFontFamily: event.currentTarget.value,
-                          }))
-                        }
-                        required
-                      >
-                        {IFRAME_FONT_FAMILY_OPTIONS.map((option) => (
-                          <s-option key={option.value} value={option.value}>
-                            {option.label}
-                          </s-option>
                         ))}
-                      </s-select>
+                      </div>
 
-                      <s-number-field
-                        label="Font size"
-                        min="12"
-                        max="20"
-                        step="1"
-                        inputMode="numeric"
-                        value={String(iframeAppearance.iframeFontSize)}
-                        suffix="px"
-                        details="Base text size for iframe widgets."
-                        error={errors.iframeFontSize || undefined}
-                        onInput={(event) =>
-                          setIframeAppearance((current) => ({
-                            ...current,
-                            iframeFontSize: event.target.value,
-                          }))
-                        }
-                        required
-                      ></s-number-field>
-                    </div>
+                      {showDiscountRewards ? (
+                        <RewardTierOptions
+                          key={`discount-${JSON.stringify(discountRewardRows)}`}
+                          currencyCode={currencyCode}
+                          errors={errors}
+                          initialRows={discountRewardRows}
+                          rewardType="discount"
+                        />
+                      ) : null}
 
-                    <label className="iframe-custom-css-field">
-                      <span>Custom CSS</span>
-                      <textarea
-                        name="iframeCustomCss"
-                        value={iframeAppearance.iframeCustomCss}
-                        rows={8}
-                        spellCheck="false"
-                        placeholder={
-                          ".gwl-floating-iframe__launcher {\n  background: #111827 !important;\n}\n\n.loyalty-points-widget--floating .loyalty-points-widget__launcher {\n  background: #111827 !important;\n}"
-                        }
-                        onChange={(event) =>
-                          setIframeAppearance((current) => ({
-                            ...current,
-                            iframeCustomCss: event.target.value,
-                          }))
-                        }
+                      {showGiftCardRewards ? (
+                        <RewardTierOptions
+                          key={`gift_card-${JSON.stringify(giftCardRewardRows)}`}
+                          currencyCode={currencyCode}
+                          errors={errors}
+                          initialRows={giftCardRewardRows}
+                          rewardType="gift_card"
+                        />
+                      ) : null}
+
+                      <RewardTierOptions
+                        key={`store_credit-${JSON.stringify(storeCreditRewardRows)}`}
+                        currencyCode={currencyCode}
+                        enabled={isStoreCreditRedemptionEnabled}
+                        errors={errors}
+                        initialRows={storeCreditRewardRows}
+                        onEnabledChange={setIsStoreCreditRedemptionEnabled}
+                        rewardType="store_credit"
+                        showEnableToggle
                       />
-                      <small>
-                        Overrides iframe widgets and the theme app extension.
-                        Keep selectors specific to loyalty classes. Use 6-digit
-                        colors like #000000.
-                      </small>
-                    </label>
-                  </s-stack>
-                </section>
 
+                      {errors.redemptionRewards ? (
+                        <s-text tone="critical">
+                          {errors.redemptionRewards}
+                        </s-text>
+                      ) : (
+                        <s-text type="small">
+                          Complete points and value before saving. Optional
+                          rules can limit a tier by spend, product, or
+                          collection.
+                        </s-text>
+                      )}
+                    </s-stack>
+                  </section>
 
-                <div className="settings-actions">
-                  <s-button
-                    type="submit"
-                    variant="primary"
-                    loading={isSaving || undefined}
-                  >
-                    Save settings
-                  </s-button>
-                </div>
-              </s-stack>
-            </Form>
+                  <section className="rule-section">
+                    <s-stack gap="base">
+                      <div className="rule-section-header">
+                        <div>
+                          <h3>Iframe appearance</h3>
+                          <p>
+                            Customize the copy and colors used by iframe embeds
+                            for theme, Hydrogen, and customer account pages.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="iframe-text-grid">
+                        {IFRAME_TEXT_FIELDS.map((field) => (
+                          <s-text-field
+                            key={field.name}
+                            label={field.label}
+                            name={field.name}
+                            value={getSettingValue(values, field.name)}
+                            details={field.details}
+                          ></s-text-field>
+                        ))}
+                      </div>
+
+                      <div className="iframe-color-grid">
+                        {IFRAME_COLOR_FIELDS.map((field) => {
+                          const value = iframeAppearance[field.name];
+
+                          return (
+                            <label
+                              className="iframe-color-field"
+                              key={field.name}
+                            >
+                              <span>{field.label}</span>
+                              <div>
+                                <input
+                                  type="color"
+                                  value={value}
+                                  aria-label={field.label}
+                                  onChange={(event) =>
+                                    setIframeAppearance((current) => ({
+                                      ...current,
+                                      [field.name]: event.target.value,
+                                    }))
+                                  }
+                                />
+                                <code>{value}</code>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+
+                      <div className="iframe-font-grid">
+                        <s-select
+                          label="Font family"
+                          details="Choose from web-safe options and commonly used Google fonts."
+                          value={iframeAppearance.iframeFontFamily}
+                          onChange={(event) =>
+                            setIframeAppearance((current) => ({
+                              ...current,
+                              iframeFontFamily: event.currentTarget.value,
+                            }))
+                          }
+                          required
+                        >
+                          {IFRAME_FONT_FAMILY_OPTIONS.map((option) => (
+                            <s-option key={option.value} value={option.value}>
+                              {option.label}
+                            </s-option>
+                          ))}
+                        </s-select>
+
+                        <s-number-field
+                          label="Font size"
+                          min="12"
+                          max="20"
+                          step="1"
+                          inputMode="numeric"
+                          value={String(iframeAppearance.iframeFontSize)}
+                          suffix="px"
+                          details="Base text size for iframe widgets."
+                          error={errors.iframeFontSize || undefined}
+                          onInput={(event) =>
+                            setIframeAppearance((current) => ({
+                              ...current,
+                              iframeFontSize: event.target.value,
+                            }))
+                          }
+                          required
+                        ></s-number-field>
+                      </div>
+
+                      <label className="iframe-custom-css-field">
+                        <span>Custom CSS</span>
+                        <textarea
+                          name="iframeCustomCss"
+                          value={iframeAppearance.iframeCustomCss}
+                          rows={8}
+                          spellCheck="false"
+                          placeholder={
+                            ".gwl-floating-iframe__launcher {\n  background: #111827 !important;\n}\n\n.loyalty-points-widget--floating .loyalty-points-widget__launcher {\n  background: #111827 !important;\n}"
+                          }
+                          onChange={(event) =>
+                            setIframeAppearance((current) => ({
+                              ...current,
+                              iframeCustomCss: event.target.value,
+                            }))
+                          }
+                        />
+                        <small>
+                          Overrides iframe widgets and the theme app extension.
+                          Keep selectors specific to loyalty classes. Use
+                          6-digit colors like #000000.
+                        </small>
+                      </label>
+                    </s-stack>
+                  </section>
+
+                  <div className="settings-actions">
+                    <s-button
+                      type="submit"
+                      variant="primary"
+                      loading={isSaving || undefined}
+                    >
+                      Save settings
+                    </s-button>
+                  </div>
+                </s-stack>
+              </Form>
             </section>
           </div>
 
@@ -1880,57 +2273,58 @@ export default function LoyaltySettingsPage() {
               className="settings-panel iframe-widgets-panel"
               aria-labelledby="iframe-widgets-title"
             >
-            <div className="settings-panel-header">
-              <div>
-                <h2 id="iframe-widgets-title">Iframe widgets</h2>
-                <p>
-                  Ready-made loyalty UI that merchants can embed in theme
-                  blocks, custom Liquid sections, or headless storefront pages.
-                </p>
+              <div className="settings-panel-header">
+                <div>
+                  <h2 id="iframe-widgets-title">Iframe widgets</h2>
+                  <p>
+                    Ready-made loyalty UI that merchants can embed in theme
+                    blocks, custom Liquid sections, or headless storefront
+                    pages.
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div className="api-endpoint-list">
-              {iframeWidgetSections.map((widget, index) => (
-                <IframeWidgetCard
-                  key={widget.title}
-                  widget={widget}
-                  initiallyOpen={index === 0}
-                />
-              ))}
-            </div>
+              <div className="api-endpoint-list">
+                {iframeWidgetSections.map((widget, index) => (
+                  <IframeWidgetCard
+                    key={widget.title}
+                    widget={widget}
+                    initiallyOpen={index === 0}
+                  />
+                ))}
+              </div>
             </section>
 
             <section
               className="settings-panel headless-api-panel"
               aria-labelledby="headless-api-title"
             >
-            <div className="settings-panel-header">
-              <div>
-                <h2 id="headless-api-title">Headless API</h2>
-                <p>
-                  Raw JSON endpoints for custom storefronts, Hydrogen builds,
-                  and theme integrations.
-                </p>
+              <div className="settings-panel-header">
+                <div>
+                  <h2 id="headless-api-title">Headless API</h2>
+                  <p>
+                    Raw JSON endpoints for custom storefronts, Hydrogen builds,
+                    and theme integrations.
+                  </p>
+                </div>
               </div>
-            </div>
 
-            {!headlessApi.hydrogenTokenConfigured ? (
-              <s-banner tone="warning">
-                Hydrogen protected endpoints require
-                HYDROGEN_LOYALTY_API_TOKEN in the app environment.
-              </s-banner>
-            ) : null}
+              {!headlessApi.hydrogenTokenConfigured ? (
+                <s-banner tone="warning">
+                  Hydrogen protected endpoints require
+                  HYDROGEN_LOYALTY_API_TOKEN in the app environment.
+                </s-banner>
+              ) : null}
 
-            <div className="api-endpoint-list">
-              {headlessApiSections.map((endpoint, index) => (
-                <HeadlessApiEndpoint
-                  key={endpoint.title}
-                  endpoint={endpoint}
-                  initiallyOpen={index === 0}
-                />
-              ))}
-            </div>
+              <div className="api-endpoint-list">
+                {headlessApiSections.map((endpoint, index) => (
+                  <HeadlessApiEndpoint
+                    key={endpoint.title}
+                    endpoint={endpoint}
+                    initiallyOpen={index === 0}
+                  />
+                ))}
+              </div>
             </section>
           </div>
         </div>
@@ -2270,6 +2664,16 @@ const settingsStyles = `
     flex: 0 0 auto;
   }
 
+  .reward-options-paused {
+    background: #f6f6f7;
+    border: 1px solid #e3e5e8;
+    border-radius: 8px;
+    color: #616a75;
+    font-size: 13px;
+    line-height: 20px;
+    padding: 12px;
+  }
+
   .summary-strip,
   .reward-tier-grid {
     display: grid;
@@ -2311,6 +2715,91 @@ const settingsStyles = `
 
   .reward-tier-card {
     padding: 14px;
+  }
+
+  .reward-rule-fields {
+    border-block-start: 1px solid #e3e5e8;
+    display: grid;
+    gap: 12px;
+    padding-block-start: 12px;
+  }
+
+  .reward-resource-picker {
+    background: #ffffff;
+    border: 1px solid #e3e5e8;
+    border-radius: 8px;
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    padding: 10px;
+  }
+
+  .reward-resource-picker__heading {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+  }
+
+  .reward-resource-picker__heading span {
+    color: #202223;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 20px;
+  }
+
+  .reward-resource-picker small {
+    color: #616a75;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .reward-resource-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .reward-resource-chip {
+    align-items: center;
+    background: #f6faf8;
+    border: 1px solid #d2eadf;
+    border-radius: 999px;
+    color: #0c5132;
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 650;
+    gap: 6px;
+    line-height: 16px;
+    max-width: 100%;
+    min-width: 0;
+    padding: 4px 6px 4px 10px;
+  }
+
+  .reward-resource-chip span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .reward-resource-chip button {
+    align-items: center;
+    appearance: none;
+    background: #ffffff;
+    border: 1px solid #b7d9ca;
+    border-radius: 999px;
+    color: #0c5132;
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 700;
+    height: 20px;
+    justify-content: center;
+    line-height: 1;
+    padding: 0;
+    width: 20px;
   }
 
   .settings-actions {

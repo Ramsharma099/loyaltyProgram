@@ -18,9 +18,11 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <p className={styles.eyebrow}>Shopify loyalty app</p>
+        <h1 className={styles.heading}>Loyalty Points Program</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Reward shoppers for every order, manage point balances, and turn
+          repeat purchases into simple, trackable rewards.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -36,16 +38,16 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Earn points</strong>. Automatically credit customers when
+            eligible Shopify orders are paid.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Redeem rewards</strong>. Let customers use their points for
+            discounts or store credit rewards.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Track activity</strong>. Review customers, balances, reward
+            history, and program performance in one admin view.
           </li>
         </ul>
       </div>

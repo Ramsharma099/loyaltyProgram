@@ -14,6 +14,10 @@ function getErrorDetails(error) {
       message: error.message,
       code: error.code,
       status: error.status,
+      cause:
+        error.cause && error.cause !== error
+          ? getErrorDetails(error.cause)
+          : undefined,
       stack: error.stack,
     };
   }

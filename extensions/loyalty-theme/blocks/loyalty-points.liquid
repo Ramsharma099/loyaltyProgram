@@ -10,10 +10,19 @@
 
   assign accent_color = block.settings.accent_color | default: '#111827'
   assign effective_display_mode = block.settings.display_mode
+  assign legacy_floating_block = false
+  if effective_display_mode == 'floating' or effective_display_mode == 'floating_iframe'
+    assign legacy_floating_block = true
+  endif
   assign presentment_currency = cart.currency.iso_code | default: localization.country.currency.iso_code | default: shop.currency
 %}
 
-{% if effective_display_mode == 'floating_iframe' %}
+{% if legacy_floating_block %}
+  {% comment %}
+    Floating section modes are deprecated. Use the Loyalty floating launcher app
+    embed instead so the storefront does not render a duplicate or inline widget.
+  {% endcomment %}
+{% elsif effective_display_mode == 'floating_iframe' %}
   {% capture loyalty_floating_iframe_src %}/apps/loyalty-points/iframe?shop={{ shop.permanent_domain | url_encode }}&customerId={{ customer_id | url_encode }}&customerEmail={{ customer_email | url_encode }}&surface=floating&currencyCode={{ presentment_currency | url_encode }}&accentColor={{ accent_color | url_encode }}&eyebrow={{ block.settings.eyebrow | url_encode }}&heading={{ block.settings.heading | url_encode }}&loggedOutMessage={{ block.settings.logged_out_message | url_encode }}&loginLabel={{ block.settings.login_link_label | url_encode }}&pointsTemplate={{ block.settings.points_template | url_encode }}&rewardsHeading={{ block.settings.rewards_heading | url_encode }}&noRewardsMessage={{ block.settings.no_rewards_message | url_encode }}&showRewards={{ block.settings.show_rewards }}&loginUrl={{ routes.account_login_url | url_encode }}&registerUrl={{ routes.account_register_url | url_encode }}&redeemUrl={{ '/apps/loyalty-points/api/redeem-points' | url_encode }}{% endcapture %}
   <div
     class="loyalty-points-widget loyalty-points-widget--floating-iframe"
@@ -557,6 +566,8 @@
               throw new Error('Please add product to cart');
             }
 
+            var ruleContext = getFallbackRuleContextFromCart(cart);
+
             return fetch(
               (widget.dataset.apiBaseUrl || '/apps/loyalty-points').replace(/\/$/, '') +
                 '/api/redeem-points',
@@ -568,7 +579,10 @@
                   shop: widget.dataset.shopDomain || '',
                   pointsToRedeem: Number(reward.points),
                   rewardType: reward.type || 'discount',
-                  allowPendingRewardCheckout: true
+                  allowPendingRewardCheckout: true,
+                  cartSubtotal: ruleContext.cartSubtotal,
+                  cartLines: ruleContext.cartLines,
+                  productIds: ruleContext.productIds
                 })
               }
             );
@@ -759,9 +773,18 @@
           surface: 'theme'
         });
 
-        fetch((widget.dataset.balanceUrl || '/apps/loyalty-points') + '?' + params.toString(), {
-          headers: { Accept: 'application/json' }
-        })
+        getFallbackCartRuleContext()
+          .then(function (ruleContext) {
+            if (ruleContext) {
+              params.set('cartSubtotal', String(ruleContext.cartSubtotal));
+              params.set('productIds', JSON.stringify(ruleContext.productIds));
+              params.set('cartLines', JSON.stringify(ruleContext.cartLines));
+            }
+
+            return fetch((widget.dataset.balanceUrl || '/apps/loyalty-points') + '?' + params.toString(), {
+              headers: { Accept: 'application/json' }
+            });
+          })
           .then(function (response) {
             if (!response.ok) throw new Error('Could not load points');
             return response.json();
@@ -813,6 +836,44 @@
               status.textContent = widget.dataset.errorMessage || 'Could not load points';
             }
           });
+      }
+
+      function getFallbackCartRuleContext() {
+        return fetch('/cart.js', { headers: { Accept: 'application/json' } })
+          .then(function (response) {
+            if (!response.ok) return null;
+            return response.json();
+          })
+          .then(function (cart) {
+            if (!cart) return null;
+
+            return getFallbackRuleContextFromCart(cart);
+          })
+          .catch(function () {
+            return null;
+          });
+      }
+
+      function getFallbackRuleContextFromCart(cart) {
+        var cartLines = Array.isArray(cart.items)
+          ? cart.items.map(function (item) {
+            return {
+              productId: item.product_id ? String(item.product_id) : '',
+              variantId: item.variant_id ? String(item.variant_id) : '',
+              quantity: item.quantity || 0
+            };
+          })
+          : [];
+        var productIds = cartLines
+          .map(function (line) { return line.productId; })
+          .filter(Boolean)
+          .filter(function (id, index, ids) { return ids.indexOf(id) === index; });
+
+        return {
+          cartSubtotal: Number(cart.items_subtotal_price || 0) / 100,
+          cartLines: cartLines,
+          productIds: productIds
+        };
       }
 
       document
@@ -882,12 +943,10 @@
       "type": "select",
       "id": "display_mode",
       "label": "Display mode",
-      "default": "floating",
+      "default": "inline",
       "options": [
-        { "value": "floating", "label": "Floating button" },
         { "value": "inline", "label": "Inline block" },
-        { "value": "iframe", "label": "Iframe embed" },
-        { "value": "floating_iframe", "label": "Floating iframe" }
+        { "value": "iframe", "label": "Iframe embed" }
       ]
     },
     {
@@ -903,7 +962,7 @@
     {
       "type": "text",
       "id": "launcher_label",
-      "label": "Floating button label",
+      "label": "Button label",
       "default": "Rewards"
     },
     {

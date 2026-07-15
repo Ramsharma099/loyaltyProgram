@@ -2,14 +2,17 @@ import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import {
   DEFAULT_LOYALTY_SETTINGS,
-  SPECIAL_REWARD_OPTIONS,
+  filterRewardsByRuleContext,
   getRewardOptionsForPreference,
+  getStoreCreditRewardOption,
   getRewardTypePreferenceFromSettings,
 } from "../services/loyalty-settings.server";
 import { isRewardsRedemptionEnabled } from "../services/shop-plan.server";
 import { logError, runShopifyGraphql } from "../services/errors.server";
+import { normalizeCheckoutReward } from "../services/checkout-reward";
 
 const DEFAULT_IFRAME_COPY = {
+  launcherLabel: "Rewards",
   eyebrow: "Rewards",
   heading: "Your loyalty points",
   loadingMessage: "Loading your points...",
@@ -25,6 +28,10 @@ const DEFAULT_IFRAME_COPY = {
 const ACCOUNT_HISTORY_PAGE_SIZE = 8;
 const PENDING_REDEMPTION_MESSAGE =
   "A loyalty reward is already applied to this order.";
+const ORDER_APPLIED_ACTIVITY_TYPES = new Set([
+  "discount_applied",
+  "gift_card_applied",
+]);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -59,12 +66,35 @@ function getShopifyCustomerId(customerId) {
   return String(customerId).split("/").pop();
 }
 
+function parseJsonParam(value, fallback) {
+  if (!value) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function getRewardRuleContextFromUrl(url) {
+  return {
+    cartSubtotal: Number(url.searchParams.get("cartSubtotal") || 0),
+    lines: parseJsonParam(url.searchParams.get("cartLines"), []),
+    productIds: parseJsonParam(url.searchParams.get("productIds"), []),
+    collectionIds: parseJsonParam(url.searchParams.get("collectionIds"), []),
+  };
+}
+
 function normalizeEmail(email) {
   return typeof email === "string" ? email.trim().toLowerCase() : "";
 }
 
 function normalizeCurrencyCode(value) {
-  const currencyCode = String(value || "").trim().toUpperCase();
+  const currencyCode = String(value || "")
+    .trim()
+    .toUpperCase();
   return /^[A-Z]{3}$/.test(currencyCode) ? currencyCode : null;
 }
 
@@ -86,47 +116,70 @@ function sanitizeFontFamily(value) {
   const fontFamilies = {
     arial: 'Arial, "Helvetica Neue", sans-serif',
     georgia: 'Georgia, "Times New Roman", serif',
-    inter: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    lato: 'Lato, ui-sans-serif, system-ui, sans-serif',
+    inter:
+      'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    lato: "Lato, ui-sans-serif, system-ui, sans-serif",
     merriweather: 'Merriweather, Georgia, "Times New Roman", serif',
     mono: 'ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace',
-    montserrat: 'Montserrat, ui-sans-serif, system-ui, sans-serif',
-    nunito: 'Nunito, ui-sans-serif, system-ui, sans-serif',
+    montserrat: "Montserrat, ui-sans-serif, system-ui, sans-serif",
+    nunito: "Nunito, ui-sans-serif, system-ui, sans-serif",
     open_sans: '"Open Sans", ui-sans-serif, system-ui, sans-serif',
-    oswald: 'Oswald, ui-sans-serif, system-ui, sans-serif',
+    oswald: "Oswald, ui-sans-serif, system-ui, sans-serif",
     playfair_display: '"Playfair Display", Georgia, "Times New Roman", serif',
-    poppins: 'Poppins, ui-sans-serif, system-ui, sans-serif',
-    raleway: 'Raleway, ui-sans-serif, system-ui, sans-serif',
-    roboto: 'Roboto, ui-sans-serif, system-ui, sans-serif',
+    poppins: "Poppins, ui-sans-serif, system-ui, sans-serif",
+    raleway: "Raleway, ui-sans-serif, system-ui, sans-serif",
+    roboto: "Roboto, ui-sans-serif, system-ui, sans-serif",
     source_sans_3: '"Source Sans 3", ui-sans-serif, system-ui, sans-serif',
-    system: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    system:
+      'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   };
-  const fontKey = String(value || "").trim().toLowerCase();
+  const fontKey = String(value || "")
+    .trim()
+    .toLowerCase();
 
   return fontFamilies[fontKey] || fontFamilies.system;
 }
 
 function getGoogleFontStylesheet(value) {
   const fontStylesheets = {
-    inter: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
+    inter:
+      "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
     lato: "https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap",
-    merriweather: "https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap",
-    montserrat: "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap",
-    nunito: "https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap",
-    open_sans: "https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap",
-    oswald: "https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&display=swap",
-    playfair_display: "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&display=swap",
-    poppins: "https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap",
-    raleway: "https://fonts.googleapis.com/css2?family=Raleway:wght@400;600;700&display=swap",
-    roboto: "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap",
-    source_sans_3: "https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap",
+    merriweather:
+      "https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap",
+    montserrat:
+      "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap",
+    nunito:
+      "https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap",
+    open_sans:
+      "https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap",
+    oswald:
+      "https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&display=swap",
+    playfair_display:
+      "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&display=swap",
+    poppins:
+      "https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap",
+    raleway:
+      "https://fonts.googleapis.com/css2?family=Raleway:wght@400;600;700&display=swap",
+    roboto:
+      "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap",
+    source_sans_3:
+      "https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap",
   };
 
-  return fontStylesheets[String(value || "").trim().toLowerCase()] || "";
+  return (
+    fontStylesheets[
+      String(value || "")
+        .trim()
+        .toLowerCase()
+    ] || ""
+  );
 }
 
 function buildFontAssets(fontFamily) {
-  const fontKey = String(fontFamily || "").trim().toLowerCase();
+  const fontKey = String(fontFamily || "")
+    .trim()
+    .toLowerCase();
 
   return {
     stylesheetUrl: getGoogleFontStylesheet(fontKey),
@@ -154,11 +207,18 @@ function getParam(url, key, fallback) {
 }
 
 function getSettingValue(settings, fieldName, fallback) {
-  return settings?.[fieldName] || DEFAULT_LOYALTY_SETTINGS[fieldName] || fallback;
+  return (
+    settings?.[fieldName] || DEFAULT_LOYALTY_SETTINGS[fieldName] || fallback
+  );
 }
 
 function buildIframeCopy(url, settings) {
   return {
+    launcherLabel: getParam(
+      url,
+      "launcherLabel",
+      DEFAULT_IFRAME_COPY.launcherLabel,
+    ),
     eyebrow: getParam(
       url,
       "eyebrow",
@@ -186,7 +246,11 @@ function buildIframeCopy(url, settings) {
     loginLabel: getParam(
       url,
       "loginLabel",
-      getSettingValue(settings, "iframeLoginLabel", DEFAULT_IFRAME_COPY.loginLabel),
+      getSettingValue(
+        settings,
+        "iframeLoginLabel",
+        DEFAULT_IFRAME_COPY.loginLabel,
+      ),
     ),
     pointsTemplate: getParam(
       url,
@@ -535,6 +599,58 @@ async function getShopCurrencyCode(shopDomain) {
   }
 }
 
+async function getGrantedAccessScopes(shopDomain) {
+  if (!shopDomain) {
+    return null;
+  }
+
+  try {
+    const { admin } = await unauthenticated.admin(shopDomain);
+    const data = await runShopifyGraphql(
+      admin,
+      `#graphql
+        query IframeAppAccessScopes {
+          currentAppInstallation {
+            accessScopes {
+              handle
+            }
+          }
+        }
+      `,
+      { operation: "Load iframe app access scopes" },
+    );
+
+    return new Set(
+      (data.currentAppInstallation?.accessScopes || [])
+        .map((scope) => scope.handle)
+        .filter(Boolean),
+    );
+  } catch (error) {
+    logError("loyalty-iframe:access-scopes", error, { shopDomain });
+    return null;
+  }
+}
+
+function filterRewardsByGrantedScopes(rewards, grantedScopes) {
+  if (!grantedScopes) {
+    return rewards;
+  }
+
+  return rewards.filter((reward) => {
+    const type = reward.type || "discount";
+
+    if (type === "gift_card") {
+      return grantedScopes.has("write_gift_cards");
+    }
+
+    if (type === "store_credit") {
+      return grantedScopes.has("write_store_credit_account_transactions");
+    }
+
+    return grantedScopes.has("write_discounts");
+  });
+}
+
 function getPendingCheckoutRedemption(customerId) {
   if (!customerId) {
     return null;
@@ -562,7 +678,13 @@ function getPendingCheckoutRedemption(customerId) {
   });
 }
 
-async function loadWidgetData(shopDomain, customerId, customerEmail, surface) {
+async function loadWidgetData(
+  shopDomain,
+  customerId,
+  customerEmail,
+  surface,
+  ruleContext,
+) {
   const shop = shopDomain
     ? await prisma.shop.findUnique({
         where: {
@@ -579,22 +701,31 @@ async function loadWidgetData(shopDomain, customerId, customerEmail, surface) {
     ...(shop?.loyaltySetting || DEFAULT_LOYALTY_SETTINGS),
     ...(await getSavedIframeAppearance(shop?.id)),
   };
+  const storeCreditEnabled = settings.storeCreditRedemptionEnabled !== false;
   const rewardTypePreference = getRewardTypePreferenceFromSettings(
     settings.redemptionRewards,
   );
   const rewardOptions = getRewardOptionsForPreference(
     settings.redemptionRewards,
     rewardTypePreference,
+  ).filter((reward) => storeCreditEnabled || reward.type !== "store_credit");
+  const grantedScopes = await getGrantedAccessScopes(shopDomain);
+  const scopedRewardOptions = filterRewardsByGrantedScopes(
+    rewardOptions,
+    grantedScopes,
+  );
+  const configuredStoreCreditReward = getStoreCreditRewardOption(
+    settings.redemptionRewards,
   );
   const surfaceRewardOptions =
     surface === "account"
-      ? SPECIAL_REWARD_OPTIONS.filter((reward) => reward.type === "store_credit")
-      : rewardOptions;
+      ? storeCreditEnabled
+        ? [configuredStoreCreditReward].filter(Boolean)
+        : []
+      : filterRewardsByRuleContext(scopedRewardOptions, ruleContext);
   const storeCreditReward =
-    surface === "account"
-      ? normalizeStoreCreditReward(
-          SPECIAL_REWARD_OPTIONS.find((reward) => reward.type === "store_credit"),
-        )
+    surface === "account" && storeCreditEnabled
+      ? normalizeStoreCreditReward(configuredStoreCreditReward)
       : null;
   const shopifyCustomerId = getShopifyCustomerId(customerId);
   const email = normalizeEmail(customerEmail);
@@ -628,32 +759,33 @@ async function loadWidgetData(shopDomain, customerId, customerEmail, surface) {
           },
         })
       : null;
-  const history = customer && surface === "account"
-    ? await prisma.rewardActivityLog.findMany({
-        where: {
-          customerId: customer.id,
-        },
-        select: {
-          id: true,
-          activityType: true,
-          message: true,
-          rewardCode: true,
-          createdAt: true,
-          metadata: true,
-          reward: {
-            select: {
-              pointsUsed: true,
-              discountAmount: true,
-              orderId: true,
+  const history =
+    customer && surface === "account"
+      ? await prisma.rewardActivityLog.findMany({
+          where: {
+            customerId: customer.id,
+          },
+          select: {
+            id: true,
+            activityType: true,
+            message: true,
+            rewardCode: true,
+            createdAt: true,
+            metadata: true,
+            reward: {
+              select: {
+                pointsUsed: true,
+                discountAmount: true,
+                orderId: true,
+              },
             },
           },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-        ...(surface === "account" ? {} : { take: 8 }),
-      })
-    : [];
+          orderBy: {
+            createdAt: "desc",
+          },
+          ...(surface === "account" ? {} : { take: 8 }),
+        })
+      : [];
   const storeCreditBalance =
     surface === "account"
       ? await getStoreCreditBalance(shopDomain, shopifyCustomerId)
@@ -668,6 +800,9 @@ async function loadWidgetData(shopDomain, customerId, customerEmail, surface) {
     currencyCode,
     customer,
     hasPendingCheckoutRedemption: Boolean(pendingCheckoutRedemption),
+    pendingCheckoutRedemption: normalizeCheckoutReward(
+      pendingCheckoutRedemption,
+    ),
     history: history.map((item) => ({
       id: item.id,
       activityType: item.activityType,
@@ -676,11 +811,14 @@ async function loadWidgetData(shopDomain, customerId, customerEmail, surface) {
       message: item.message,
       rewardCode: item.rewardCode,
       createdAt: item.createdAt,
-      orderId:
-        getMetadataValue(item.metadata, "orderId") ||
-        item.reward?.orderId ||
-        null,
-      orderName: getMetadataValue(item.metadata, "orderName") || null,
+      orderId: ORDER_APPLIED_ACTIVITY_TYPES.has(item.activityType)
+        ? getMetadataValue(item.metadata, "orderId") ||
+          item.reward?.orderId ||
+          null
+        : null,
+      orderName: ORDER_APPLIED_ACTIVITY_TYPES.has(item.activityType)
+        ? getMetadataValue(item.metadata, "orderName") || null
+        : null,
       pointsUsed:
         item.reward?.pointsUsed ||
         getMetadataValue(item.metadata, "pointsUsed"),
@@ -697,7 +835,13 @@ async function loadWidgetData(shopDomain, customerId, customerEmail, surface) {
   };
 }
 
-function renderRewardList(rewards, points, redemptionEnabled, copy, currencyCode) {
+function renderRewardList(
+  rewards,
+  points,
+  redemptionEnabled,
+  copy,
+  currencyCode,
+) {
   if (!redemptionEnabled) {
     return `<p class="gwl-loyalty-iframe__message">Rewards redemption is currently paused.</p>`;
   }
@@ -766,7 +910,10 @@ function renderAccountHistoryRows(history, noHistoryMessage, currencyCode) {
     `;
   }
 
-  const pageCount = Math.max(1, Math.ceil(history.length / ACCOUNT_HISTORY_PAGE_SIZE));
+  const pageCount = Math.max(
+    1,
+    Math.ceil(history.length / ACCOUNT_HISTORY_PAGE_SIZE),
+  );
 
   return `
     <div class="gwl-account-loyalty__history">
@@ -1456,7 +1603,10 @@ function renderAccountIframeDocument({
                             <p>${escapeHtml(conversionText)}</p>
                           </div>
                           <span class="gwl-account-loyalty__credit-pill">Available store credit: <span data-account-current-credit-inline>${escapeHtml(
-                            formatCurrency(currentStoreCreditAmount, currencyCode),
+                            formatCurrency(
+                              currentStoreCreditAmount,
+                              currencyCode,
+                            ),
                           )}</span></span>
                         </div>
                         <form class="gwl-account-loyalty__redeem-form" data-account-store-credit-form>
@@ -1483,7 +1633,10 @@ function renderAccountIframeDocument({
                           <div class="gwl-account-loyalty__preview">
                             <span>Store credit value</span>
                             <strong data-account-preview-credit>${escapeHtml(
-                              formatCurrency(selectedCreditAmount, currencyCode),
+                              formatCurrency(
+                                selectedCreditAmount,
+                                currencyCode,
+                              ),
                             )}</strong>
                           </div>
                           <button class="gwl-account-loyalty__submit" type="submit" data-account-submit ${
@@ -1833,7 +1986,7 @@ function renderAccountIframeDocument({
 function renderFloatingRewardItems(
   rewards,
   points,
-  hasPendingCheckoutRedemption,
+  pendingCheckoutRedemption,
   copy,
   currencyCode,
 ) {
@@ -1843,6 +1996,13 @@ function renderFloatingRewardItems(
     )}</p>`;
   }
 
+  const hasPendingCheckoutRedemption = Boolean(
+    pendingCheckoutRedemption?.rewardCode,
+  );
+  const normalizedPendingReward = normalizeCheckoutReward(
+    pendingCheckoutRedemption,
+  );
+
   return `
     <ul class="gwl-floating-iframe__reward-list">
       ${rewards
@@ -1850,8 +2010,13 @@ function renderFloatingRewardItems(
           const rewardPoints = Number(reward.points || 0);
           const canRedeem = points >= rewardPoints;
           const pointsRemaining = Math.max(rewardPoints - points, 0);
+          const isApplied = Boolean(
+            normalizedPendingReward?.rewardCode &&
+              getRewardKey(reward) ===
+                `${normalizedPendingReward.rewardType}:${normalizedPendingReward.pointsUsed}`,
+          );
           const cta = canRedeem
-            ? hasPendingCheckoutRedemption
+            ? isApplied
               ? "Applied"
               : copy.redeemButtonText
             : `${formatNumber(pointsRemaining)} more needed`;
@@ -1887,10 +2052,12 @@ function renderFloatingRewardItems(
 
 function renderFloatingIframeDocument({
   appCustomerId,
+  cartUpdateUrl,
   copy,
   currencyCode,
   customerId,
   hasPendingCheckoutRedemption,
+  pendingCheckoutRedemption,
   loginUrl,
   points,
   redeemUrl,
@@ -1909,11 +2076,12 @@ function renderFloatingIframeDocument({
   );
   const nextReward = rewards
     .filter((reward) => Number(reward.points || 0) > points)
-    .sort((left, right) => Number(left.points || 0) - Number(right.points || 0))[0];
-  const balanceMessage =
-    hasPendingCheckoutRedemption
-      ? PENDING_REDEMPTION_MESSAGE
-      : "Ready when you are.";
+    .sort(
+      (left, right) => Number(left.points || 0) - Number(right.points || 0),
+    )[0];
+  const balanceMessage = hasPendingCheckoutRedemption
+    ? PENDING_REDEMPTION_MESSAGE
+    : "Ready when you are.";
   const availableCountText =
     availableRewards.length === 1
       ? "You have 1 reward available"
@@ -1921,14 +2089,14 @@ function renderFloatingIframeDocument({
   const availableRewardItems = renderFloatingRewardItems(
     availableRewards,
     points,
-    hasPendingCheckoutRedemption,
+    pendingCheckoutRedemption,
     copy,
     currencyCode,
   );
   const allRewardItems = renderFloatingRewardItems(
     rewards,
     points,
-    hasPendingCheckoutRedemption,
+    pendingCheckoutRedemption,
     copy,
     currencyCode,
   );
@@ -1968,6 +2136,7 @@ function renderFloatingIframeDocument({
         display: flex;
         flex-direction: column;
         gap: 12px;
+        justify-content: flex-end;
         min-height: 100vh;
         padding: 16px;
         pointer-events: none;
@@ -1989,7 +2158,7 @@ function renderFloatingIframeDocument({
         display: flex;
         font-weight: 800;
         gap: 9px;
-        margin-top: auto;
+        margin-top: 0;
         min-height: 52px;
         padding: 0 20px;
         pointer-events: auto;
@@ -2278,11 +2447,14 @@ function renderFloatingIframeDocument({
       data-shop-domain="${escapeAttr(shopDomain || "")}"
       data-customer-id="${escapeAttr(appCustomerId || customerId || "")}"
       data-redeem-url="${escapeAttr(redeemUrl)}"
+      data-cart-update-url="${escapeAttr(cartUpdateUrl)}"
+      data-pending-reward-code="${escapeAttr(pendingCheckoutRedemption?.rewardCode || "")}"
+      data-pending-reward-type="${escapeAttr(pendingCheckoutRedemption?.rewardType || "")}"
     >
       <section class="gwl-floating-iframe__panel" id="floating-loyalty-panel" aria-label="Rewards" hidden data-floating-panel>
         <div data-floating-view="overview">
           <div class="gwl-floating-iframe__top">
-            <span>Rewards</span>
+            <span>${escapeHtml(copy.launcherLabel)}</span>
             <button class="gwl-floating-iframe__close" type="button" aria-label="Close rewards" data-floating-close>X</button>
           </div>
           <div class="gwl-floating-iframe__header">
@@ -2395,7 +2567,7 @@ function renderFloatingIframeDocument({
       </section>
       <button class="gwl-floating-iframe__launcher gwl-floating-launcher" type="button" aria-controls="floating-loyalty-panel" aria-expanded="false" data-floating-toggle>
         <span aria-hidden="true">★</span>
-        <span>Rewards</span>
+        <span>${escapeHtml(copy.launcherLabel)}</span>
       </button>
     </main>
     <script>
@@ -2473,6 +2645,7 @@ function renderFloatingIframeDocument({
                 shop: root.dataset.shopDomain,
                 pointsToRedeem: Number(reward.points),
                 rewardType: reward.type || "discount",
+                surface: "floating",
                 allowPendingRewardCheckout: true
               })
             });
@@ -2480,13 +2653,49 @@ function renderFloatingIframeDocument({
             if (!data.success || !data.reward) {
               throw new Error(data.message || "Could not redeem points.");
             }
-            setMessage("Your reward created and applied on checkout.", false);
+            if (data.reward.rewardType === "discount") {
+              const application = await applyDiscountToCart(data.reward);
+              if (!application.success) {
+                throw new Error(application.message || "Could not apply discount to cart.");
+              }
+            }
+            setMessage(
+              data.reward.rewardType === "discount"
+                ? "Discount applied to your cart and checkout."
+                : "Reward created. Open checkout to use it.",
+              false
+            );
+            root.querySelectorAll("[data-floating-reward]").forEach((rewardButton) => {
+              rewardButton.disabled = true;
+            });
             if (cta) cta.textContent = "Applied";
           } catch (error) {
             setMessage(error.message || "Could not redeem points.", true);
             button.disabled = false;
             if (cta) cta.textContent = originalText;
           }
+        }
+
+        async function applyDiscountToCart(reward) {
+          const response = await fetch(root.dataset.cartUpdateUrl || "/cart/update.js", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({discount: reward.rewardCode})
+          });
+          const cart = await response.json().catch(() => null);
+
+          if (!response.ok || !cart) {
+            return {
+              success: false,
+              message: cart?.description || "Could not apply discount to cart."
+            };
+          }
+
+          return {success: true};
         }
 
         launcher?.addEventListener("click", () => {
@@ -2516,6 +2725,22 @@ function renderFloatingIframeDocument({
           type: "loyalty-floating-iframe-state",
           open: false
         }, "*");
+        if (
+          root.dataset.pendingRewardType === "discount" &&
+          root.dataset.pendingRewardCode
+        ) {
+          applyDiscountToCart({
+            rewardCode: root.dataset.pendingRewardCode,
+            rewardType: root.dataset.pendingRewardType
+          }).then((result) => {
+            setMessage(
+              result.success
+                ? "Discount applied to your cart and checkout."
+                : result.message || "Could not apply discount to cart.",
+              !result.success
+            );
+          });
+        }
         resize();
         window.addEventListener("load", resize);
         new ResizeObserver(resize).observe(document.body);
@@ -2547,7 +2772,13 @@ function renderIframeDocument({
   );
   const rewardsMarkup =
     loggedIn && showRewards
-      ? renderRewardList(rewardOptions, points, redemptionEnabled, copy, currencyCode)
+      ? renderRewardList(
+          rewardOptions,
+          points,
+          redemptionEnabled,
+          copy,
+          currencyCode,
+        )
       : "";
 
   return `<!doctype html>
@@ -2900,10 +3131,16 @@ export const loader = async ({ request }) => {
     const loginUrl = getParam(url, "loginUrl", "/account/login");
     const registerUrl = getParam(url, "registerUrl", "/account/register");
     const redeemUrl = getParam(url, "redeemUrl", "/api/redeem-points");
+    const cartUpdateUrl = getParam(
+      url,
+      "cartUpdateUrl",
+      "/cart/update.js",
+    );
     const {
       customer,
       currencyCode: shopCurrencyCode,
       hasPendingCheckoutRedemption,
+      pendingCheckoutRedemption,
       history,
       redemptionEnabled,
       rewardOptions,
@@ -2915,6 +3152,7 @@ export const loader = async ({ request }) => {
       customerId,
       customerEmail,
       surface,
+      getRewardRuleContextFromUrl(url),
     );
     const currencyCode = presentmentCurrencyCode || shopCurrencyCode;
     const copy = buildIframeCopy(url, settings);
@@ -2951,10 +3189,12 @@ export const loader = async ({ request }) => {
         : surface === "floating"
           ? renderFloatingIframeDocument({
               appCustomerId: customer?.id,
+              cartUpdateUrl,
               copy,
               currencyCode,
               customerId,
               hasPendingCheckoutRedemption,
+              pendingCheckoutRedemption,
               loginUrl,
               points,
               redeemUrl,
@@ -2964,31 +3204,28 @@ export const loader = async ({ request }) => {
               shopDomain,
               theme,
             })
-        : renderIframeDocument({
-            appCustomerId: customer?.id,
-            copy,
-            currencyCode,
-            customerId,
-            loginUrl,
-            points,
-            redeemUrl,
-            redemptionEnabled,
-            registerUrl,
-            rewardOptions,
-            shopDomain,
-            showRewards,
-            theme,
-          });
+          : renderIframeDocument({
+              appCustomerId: customer?.id,
+              copy,
+              currencyCode,
+              customerId,
+              loginUrl,
+              points,
+              redeemUrl,
+              redemptionEnabled,
+              registerUrl,
+              rewardOptions,
+              shopDomain,
+              showRewards,
+              theme,
+            });
 
-    return new Response(
-      document,
-      {
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "no-store",
-        },
+    return new Response(document, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
       },
-    );
+    });
   } catch (error) {
     logError("loyalty-iframe", error, {
       requestUrl: request.url,

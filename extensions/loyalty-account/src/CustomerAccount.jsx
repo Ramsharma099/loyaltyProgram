@@ -7,7 +7,8 @@ import {
 import { render } from "preact";
 import { useEffect, useMemo, useRef, useState, useCallback } from "preact/hooks";
 import { fetchApiJson } from "./api";
-import { API_BASE_URL } from "./api-base-url";
+import { API_BASE_URL as FALLBACK_API_BASE_URL } from "./api-base-url";
+import { API_BASE_URL } from "./api-base-url.generated";
 
 const HISTORY_PAGE_SIZE = 8;
 const APP_PROXY_PATH = "/apps/loyalty-points";
@@ -183,8 +184,9 @@ function isAppProxyBaseUrl(value) {
 
 function getApiBaseUrls() {
   const generatedUrl = normalizeApiBaseUrl(API_BASE_URL);
+  const fallbackUrl = normalizeApiBaseUrl(FALLBACK_API_BASE_URL);
 
-  return generatedUrl ? [generatedUrl] : [];
+  return [...new Set([generatedUrl, fallbackUrl].filter(Boolean))];
 }
 
 function buildApiUrl(apiBaseUrl, endpoint, params) {
@@ -979,6 +981,7 @@ export function CustomerAccountLoyaltyPoints() {
                   )
                     ? "Store credit"
                     : item.rewardCode || "Reward activity";
+                  const hasOrder = Boolean(item.orderName || item.orderId);
 
                   return (
                     <s-box
@@ -1030,7 +1033,10 @@ export function CustomerAccountLoyaltyPoints() {
                           </s-stack>
                         </s-grid>
 
-                        <s-grid gridTemplateColumns="1fr 1fr 1fr" gap="small">
+                        <s-grid
+                          gridTemplateColumns={hasOrder ? "1fr 1fr 1fr" : "1fr 1fr"}
+                          gap="small"
+                        >
                           <s-box
                             background="subdued"
                             padding="small"
@@ -1055,18 +1061,20 @@ export function CustomerAccountLoyaltyPoints() {
                               </s-text>
                             </s-stack>
                           </s-box>
-                          <s-box
-                            background="subdued"
-                            padding="small"
-                            borderRadius="base"
-                          >
-                            <s-stack gap="none">
-                              <s-text color="subdued" type="small">Order</s-text>
-                              <s-text type="strong">
-                                {item.orderName || item.orderId || "-"}
-                              </s-text>
-                            </s-stack>
-                          </s-box>
+                          {hasOrder ? (
+                            <s-box
+                              background="subdued"
+                              padding="small"
+                              borderRadius="base"
+                            >
+                              <s-stack gap="none">
+                                <s-text color="subdued" type="small">Order</s-text>
+                                <s-text type="strong">
+                                  {item.orderName || item.orderId}
+                                </s-text>
+                              </s-stack>
+                            </s-box>
+                          ) : null}
                         </s-grid>
 
                         <s-text color="subdued">

@@ -2,8 +2,9 @@ import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import {
   DEFAULT_LOYALTY_SETTINGS,
-  SPECIAL_REWARD_OPTIONS,
+  filterRewardsByRuleContext,
   getRewardOptionsForPreference,
+  getStoreCreditRewardOption,
 } from "../services/loyalty-settings.server";
 import {
   createRewardActivityLog,
@@ -18,6 +19,7 @@ import {
   parseJsonRequest,
   runShopifyGraphql,
 } from "../services/errors.server";
+import { normalizeCheckoutReward } from "../services/checkout-reward.js";
 
 // CORS HEADERS
 const corsHeaders = {
@@ -26,9 +28,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
 };
 const DISCOUNT_EXPIRY_HOURS = 24;
-const storeCreditReward = SPECIAL_REWARD_OPTIONS.find(
-  (reward) => reward.type === "store_credit",
-);
 const PENDING_REDEMPTION_MESSAGE =
   "A loyalty reward is already applied to this order.";
 
@@ -68,6 +67,9 @@ function normalizeAppliedDiscountCodes(value) {
 }
 
 function getSelectedReward(rewardOptions, rewardType, redeemPoints) {
+  const storeCreditReward = rewardOptions.find(
+    (reward) => reward.type === "store_credit",
+  );
   const exactReward = rewardOptions.find(
     (reward) =>
       reward.points === redeemPoints &&
@@ -101,6 +103,7 @@ function isMissingLoyaltySettingFieldError(error) {
     error?.code === "P2022" ||
     message.includes("redemptionRewards") ||
     message.includes("checkoutRedemptionEnabled") ||
+    message.includes("storeCreditRedemptionEnabled") ||
     message.includes("preferredIntegration") ||
     message.includes("isShopifyPlus") ||
     message.includes("isPartnerDevelopment") ||
@@ -125,9 +128,102 @@ function isStoreCreditPermissionError(error) {
   );
 }
 
-async function getRewardOptions(shopId) {
+function getPermissionErrorMessage(rewardType) {
+  if (rewardType === "store_credit") {
+    return "Store credit redemption needs updated app permissions. Reauthorize the app, then try again.";
+  }
+
+  if (rewardType === "gift_card") {
+    return "Gift card redemption needs updated app permissions. Reauthorize the app, then try again.";
+  }
+
+  return "Reward redemption needs updated app permissions. Reauthorize the app, then try again.";
+}
+
+function isStoreCreditRedemptionEnabled(settings) {
+  return settings?.storeCreditRedemptionEnabled !== false;
+}
+
+function includeStoreCreditReward(rewards, settings, ruleContext) {
+  if (!isStoreCreditRedemptionEnabled(settings)) {
+    return rewards.filter((reward) => reward.type !== "store_credit");
+  }
+
+  const storeCreditReward = filterRewardsByRuleContext(
+    [getStoreCreditRewardOption(settings?.redemptionRewards)].filter(Boolean),
+    ruleContext,
+  )[0];
+
+  if (
+    !storeCreditReward ||
+    rewards.some((reward) => reward.type === "store_credit")
+  ) {
+    return rewards;
+  }
+
+  return [...rewards, storeCreditReward].sort((a, b) => a.points - b.points);
+}
+
+async function getGrantedAccessScopes(shopDomain) {
+  if (!shopDomain) {
+    return null;
+  }
+
+  try {
+    const { admin } = await unauthenticated.admin(shopDomain);
+    const data = await runShopifyGraphql(
+      admin,
+      `#graphql
+        query RedeemAppAccessScopes {
+          currentAppInstallation {
+            accessScopes {
+              handle
+            }
+          }
+        }
+      `,
+      { operation: "Load redeem app access scopes" },
+    );
+
+    return new Set(
+      (data.currentAppInstallation?.accessScopes || [])
+        .map((scope) => scope.handle)
+        .filter(Boolean),
+    );
+  } catch (error) {
+    logError("redeem-points:access-scopes", error, { shopDomain });
+    return null;
+  }
+}
+
+function filterRewardsByGrantedScopes(rewards, grantedScopes) {
+  if (!grantedScopes) {
+    return rewards;
+  }
+
+  return rewards.filter((reward) => {
+    const type = reward.type || "discount";
+
+    if (type === "gift_card") {
+      return grantedScopes.has("write_gift_cards");
+    }
+
+    if (type === "store_credit") {
+      return grantedScopes.has("write_store_credit_account_transactions");
+    }
+
+    return grantedScopes.has("write_discounts");
+  });
+}
+
+async function getRewardOptions(shopId, ruleContext, shopDomain) {
+  const grantedScopes = await getGrantedAccessScopes(shopDomain);
+
   if (!hasLoyaltySettingField("redemptionRewards")) {
-    return getRewardOptionsForPreference();
+    return filterRewardsByGrantedScopes(
+      filterRewardsByRuleContext(getRewardOptionsForPreference(), ruleContext),
+      grantedScopes,
+    );
   }
 
   try {
@@ -137,16 +233,32 @@ async function getRewardOptions(shopId) {
       },
       select: {
         redemptionRewards: true,
+        ...(hasLoyaltySettingField("storeCreditRedemptionEnabled")
+          ? {
+              storeCreditRedemptionEnabled: true,
+            }
+          : {}),
       },
     });
 
-    return getRewardOptionsForPreference(settings?.redemptionRewards);
+    const rewards = filterRewardsByRuleContext(
+      getRewardOptionsForPreference(settings?.redemptionRewards),
+      ruleContext,
+    );
+
+    return filterRewardsByGrantedScopes(
+      includeStoreCreditReward(rewards, settings, ruleContext),
+      grantedScopes,
+    );
   } catch (error) {
     if (!isMissingLoyaltySettingFieldError(error)) {
       throw error;
     }
 
-    return getRewardOptionsForPreference();
+    return filterRewardsByGrantedScopes(
+      filterRewardsByRuleContext(getRewardOptionsForPreference(), ruleContext),
+      grantedScopes,
+    );
   }
 }
 
@@ -302,6 +414,10 @@ export const action = async ({ request }) => {
       pointsToRedeem,
       rewardType = "discount",
       appliedDiscountCodes,
+      cartSubtotal,
+      cartLines,
+      productIds,
+      collectionIds,
       allowPendingRewardCheckout = false,
       rewardCode,
     } = body;
@@ -376,17 +492,17 @@ export const action = async ({ request }) => {
     }
 
     if (operation === "releasePendingReward") {
-      const pendingRedemption = await getPendingCheckoutRedemption(customer.id, [
-        "discount",
-        "gift_card",
-      ]);
+      const pendingRedemption = await getPendingCheckoutRedemption(
+        customer.id,
+        ["discount", "gift_card"],
+      );
       const normalizedRewardCode = String(rewardCode || "")
         .trim()
         .toUpperCase();
       const shouldReleasePendingReward = Boolean(
         pendingRedemption &&
-          normalizedRewardCode &&
-          pendingRedemption.rewardCode.toUpperCase() === normalizedRewardCode,
+        normalizedRewardCode &&
+        pendingRedemption.rewardCode.toUpperCase() === normalizedRewardCode,
       );
 
       if (shouldReleasePendingReward) {
@@ -488,11 +604,11 @@ export const action = async ({ request }) => {
             {
               success: true,
               message: PENDING_REDEMPTION_MESSAGE,
-              reward: {
+              reward: normalizeCheckoutReward({
                 ...pendingRedemption,
                 rewardType: pendingRedemption.rewardType || "discount",
-              },
-              pendingReward: pendingRedemption,
+              }),
+              pendingReward: normalizeCheckoutReward(pendingRedemption),
             },
             {
               headers: corsHeaders,
@@ -528,7 +644,16 @@ export const action = async ({ request }) => {
       }
     }
 
-    const rewardOptions = await getRewardOptions(customer.shop.id);
+    const rewardOptions = await getRewardOptions(
+      customer.shop.id,
+      {
+        cartSubtotal,
+        lines: cartLines,
+        productIds,
+        collectionIds,
+      },
+      customer.shop.shopDomain,
+    );
     const selectedReward = getSelectedReward(
       rewardOptions,
       rewardType,
@@ -595,7 +720,8 @@ export const action = async ({ request }) => {
       expiresAt,
     });
     const shouldDeferPointDeduction =
-      rewardTypeForStorage === "discount" || rewardTypeForStorage === "gift_card";
+      rewardTypeForStorage === "discount" ||
+      rewardTypeForStorage === "gift_card";
     redemptionFailureContext.rewardCode = issuedReward.rewardCode;
 
     // DATABASE TRANSACTION
@@ -687,12 +813,12 @@ export const action = async ({ request }) => {
     return Response.json(
       {
         success: true,
-        reward: {
+        reward: normalizeCheckoutReward({
           ...reward,
           rewardType,
           rewardCode: issuedReward.rewardCode,
           amount: issuedReward.amount,
-        },
+        }),
       },
       {
         headers: corsHeaders,
@@ -719,10 +845,10 @@ export const action = async ({ request }) => {
       rewardType: redemptionFailureContext?.selectedReward?.type,
     });
 
-    if (redemptionFailureContext) {
-      const failedRewardType =
-        redemptionFailureContext.selectedReward?.type || "discount";
+    const failedRewardType =
+      redemptionFailureContext?.selectedReward?.type || "discount";
 
+    if (redemptionFailureContext) {
       if (failedRewardType === "discount") {
         await tryCreateRewardActivityLog({
           customerId: redemptionFailureContext.customerId,
@@ -767,8 +893,7 @@ export const action = async ({ request }) => {
       return Response.json(
         {
           success: false,
-          message:
-            "Store credit redemption needs updated app permissions. Reauthorize the app, then try again.",
+          message: getPermissionErrorMessage(failedRewardType),
         },
         {
           status: 403,
@@ -803,19 +928,18 @@ async function issueShopifyReward({
   const rewardType = selectedReward.type || "discount";
 
   if (rewardType === "gift_card") {
-    return createGiftCardReward({ admin, customer, selectedReward });
+    return createGiftCardReward({ admin, selectedReward });
   }
 
   if (rewardType === "store_credit") {
     return createStoreCreditReward({ admin, customer, selectedReward });
   }
 
-  return createDiscountReward({ admin, customer, selectedReward, expiresAt });
+  return createDiscountReward({ admin, selectedReward, expiresAt });
 }
 
 async function createDiscountReward({
   admin,
-  customer,
   selectedReward,
   expiresAt,
 }) {
@@ -855,10 +979,8 @@ async function createDiscountReward({
         startsAt: new Date().toISOString(),
         endsAt: expiresAt?.toISOString(),
         tags: discountTags,
-        customerSelection: {
-          customers: {
-            add: [`gid://shopify/Customer/${customer.shopifyCustomerId}`],
-          },
+        context: {
+          all: "ALL",
         },
         customerGets: {
           value: {
@@ -901,7 +1023,7 @@ async function createDiscountReward({
   };
 }
 
-async function createGiftCardReward({ admin, customer, selectedReward }) {
+async function createGiftCardReward({ admin, selectedReward }) {
   const data = await runAdminGraphql(
     admin,
     `#graphql
@@ -921,7 +1043,6 @@ async function createGiftCardReward({ admin, customer, selectedReward }) {
     {
       input: {
         initialValue: selectedReward.amount.toString(),
-        customerId: `gid://shopify/Customer/${customer.shopifyCustomerId}`,
         note: "Loyalty reward redemption",
       },
     },

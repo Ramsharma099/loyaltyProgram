@@ -1,1 +1,1 @@
-export { action } from "./api.redeem-points";
+export { action, loader } from "./api.redeem-points";

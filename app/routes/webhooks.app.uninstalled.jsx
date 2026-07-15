@@ -17,11 +17,10 @@ export const action = async ({ request }) => {
   const { shop } = webhook;
 
   try {
-    await prisma.shop.deleteMany({
-      where: {
-        shopDomain: shop,
-      },
-    });
+    // Shopify revokes these tokens when the app is uninstalled. Keep the
+    // merchant's loyalty configuration and customer history so a reinstall
+    // cannot erase earned points or reward records.
+    await prisma.session.deleteMany({ where: { shop } });
 
     return new Response("App uninstalled");
   } catch (error) {

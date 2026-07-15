@@ -1,3 +1,5 @@
 {
-  "purchase.checkout.contact.render-after": {}
+  "purchase.checkout.contact.render-after": {},
+  "purchase.checkout.block.render": {},
+  "purchase.checkout.payment-method-list.render-before": {}
 }
